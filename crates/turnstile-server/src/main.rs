@@ -16,6 +16,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = ChallengeStore::connect(&config.redis_url).await?;
     let state = AppState::new(config, store);
 
+    // TODO(Phase 2b): per-IP rate limiting via a GovernorLayer. Deferred — the
+    // rsproxy crate mirror doesn't index `tower-governor`; revisit with either a
+    // direct crates.io fetch, the `governor` crate + a custom axum middleware,
+    // or a self-contained limiter. Applied in `main()` (not the test-facing
+    // `app()`) so integration tests stay unthrottled.
     let app = app(state);
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
     tracing::info!(%bind_addr, "webrify turnstile server listening");
