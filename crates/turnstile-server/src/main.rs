@@ -1,5 +1,5 @@
-//! Server entry point: load config, connect Redis, wire routes, serve with
-//! graceful shutdown + per-IP rate limiting.
+//! Entry point. Dispatches to either the CLI (`webrify sitekey ...`) or the
+//! async verification server.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -11,8 +11,17 @@ use turnstile_server::{
     state::AppState, store::ChallengeStore,
 };
 
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+    // Subcommand: `webrify sitekey <add|remove|list> [origin] [--config <path>]`
+    if args.get(1).map(String::as_str) == Some("sitekey") {
+        return turnstile_server::cli::sitekey(&args[2..]);
+    }
+    run_server()
+}
+
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .json()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
