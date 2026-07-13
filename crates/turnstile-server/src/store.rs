@@ -1,87 +1,141 @@
-//! Redis-backed challenge store.
+//! Redis-backed challenge store with two interchangeable backends.
 //!
-//! Single responsibility: atomically mark a challenge as spent so it can be
-//! verified at most once (anti-replay). Uses `SET key 1 NX EX ttl` — a single
-//! atomic round-trip — so two concurrent verifies of the same challenge cannot
-//! both pass (TOCTOU-safe). Redis failures propagate so the caller fails CLOSED
-//! (verification refused, never silently bypassed).
+//! - [`ChallengeStore::Single`]: one Redis node via `ConnectionManager`
+//!   (multiplexed, cheap-clone handle).
+//! - [`ChallengeStore::Cluster`]: a Redis Cluster via the async
+//!   `ClusterConnection`. All Webrify Redis ops are single-key
+//!   (`webrify:spent:{challenge}`, `webrify:escalation:{ip}`), so they're
+//!   cluster-safe — no cross-slot multi-key operations or Lua.
+//!
+//! Anti-replay uses atomic `SET key 1 NX EX` (TOCTOU-safe). Redis failures
+//! always propagate so the caller fails CLOSED (verification refused, never
+//! silently bypassed).
 
 use std::net::IpAddr;
 use std::time::Duration;
 
 use redis::aio::ConnectionManager;
+use redis::cluster::ClusterClient;
 
-pub struct ChallengeStore {
-    conn: ConnectionManager,
+#[derive(Clone)]
+// Both variants live behind `Arc<ChallengeStore>` in `AppState`, so the enum's
+// stack size is irrelevant; suppress the variant-size-difference lint.
+#[allow(clippy::large_enum_variant)]
+pub enum ChallengeStore {
+    /// Single-node Redis (ConnectionManager is a cheap-clone handle).
+    Single(ConnectionManager),
+    /// Redis Cluster. The async cluster connection is a multiplexed handle.
+    Cluster(redis::cluster_async::ClusterConnection),
 }
 
 impl ChallengeStore {
-    /// Connect (and verify) a pooled async connection manager to `url`.
-    pub async fn connect(url: &str) -> Result<Self, redis::RedisError> {
+    /// Connect to a single Redis node.
+    pub async fn connect_single(url: &str) -> Result<Self, redis::RedisError> {
         let client = redis::Client::open(url)?;
         let conn = client.get_connection_manager().await?;
-        Ok(Self { conn })
+        Ok(Self::Single(conn))
+    }
+
+    /// Connect to a Redis Cluster. `seed_urls` may be any subset of nodes — the
+    /// client discovers the full topology. Pass ≥3 nodes for a healthy cluster.
+    pub async fn connect_cluster(seed_urls: &[String]) -> Result<Self, redis::RedisError> {
+        let client = ClusterClient::new(seed_urls.to_vec())?;
+        let conn = client.get_async_connection().await?;
+        Ok(Self::Cluster(conn))
     }
 
     /// Atomically claim `challenge_key` as spent.
     ///
-    /// Returns `Ok(true)` if this is the first claim (caller proceeds with
-    /// verification), `Ok(false)` if already spent (replay — reject). Any Redis
-    /// error propagates so the caller can fail closed (HTTP 503).
+    /// `Ok(true)` = first claim (proceed); `Ok(false)` = already spent (replay,
+    /// reject). Errors propagate so the caller fails closed (HTTP 503).
     pub async fn claim_spent(
         &self,
         challenge_key: &str,
         ttl: Duration,
     ) -> Result<bool, redis::RedisError> {
-        let mut conn = self.conn.clone();
-        let key = spent_key(challenge_key);
-        // SET key 1 NX EX ttl  →  Some("OK") on first set, None if key existed.
-        let res: Option<String> = redis::cmd("SET")
-            .arg(&key)
-            .arg("1")
-            .arg("NX")
-            .arg("EX")
-            .arg(ttl.as_secs())
-            .query_async(&mut conn)
-            .await?;
-        Ok(res.is_some())
+        match self {
+            Self::Single(c) => claim_spent_impl(&mut c.clone(), challenge_key, ttl).await,
+            Self::Cluster(c) => claim_spent_impl(&mut c.clone(), challenge_key, ttl).await,
+        }
     }
 
     /// Liveness probe (used by `/ready`).
     pub async fn ping(&self) -> Result<(), redis::RedisError> {
-        let mut conn = self.conn.clone();
-        redis::cmd("PING").query_async::<String>(&mut conn).await?;
-        Ok(())
+        match self {
+            Self::Single(c) => ping_impl(&mut c.clone()).await,
+            Self::Cluster(c) => ping_impl(&mut c.clone()).await,
+        }
     }
 
-    /// Record a risk-escalation event for `ip` (used by adaptive difficulty).
-    /// Each call INCRements a per-IP counter and refreshes its TTL. Returns the
-    /// new count. Redis failures propagate (fail-closed: on error the caller
-    /// skips adaptive bump rather than refusing the request).
+    /// Record a risk-escalation event for `ip` (INCR + refresh TTL). Returns the
+    /// new count. Errors propagate (fail-closed on verification; the adaptive
+    /// caller skips the bump rather than refusing on a Redis blip).
     pub async fn record_escalation(
         &self,
         ip: IpAddr,
         ttl: Duration,
     ) -> Result<u32, redis::RedisError> {
-        let mut conn = self.conn.clone();
-        let key = escalation_key(ip);
-        let count: u32 = redis::cmd("INCR").arg(&key).query_async(&mut conn).await?;
-        let _: () = redis::cmd("EXPIRE")
-            .arg(&key)
-            .arg(ttl.as_secs())
-            .query_async(&mut conn)
-            .await?;
-        Ok(count)
+        match self {
+            Self::Single(c) => record_escalation_impl(&mut c.clone(), ip, ttl).await,
+            Self::Cluster(c) => record_escalation_impl(&mut c.clone(), ip, ttl).await,
+        }
     }
 
-    /// How many recent escalations has this IP accumulated? 0 = clean (or
-    /// never seen, or Redis returned nil for the key).
+    /// How many recent escalations has this IP accumulated? 0 = clean / unseen.
     pub async fn escalation_count(&self, ip: IpAddr) -> Result<u32, redis::RedisError> {
-        let mut conn = self.conn.clone();
-        let key = escalation_key(ip);
-        let count: Option<u32> = redis::cmd("GET").arg(&key).query_async(&mut conn).await?;
-        Ok(count.unwrap_or(0))
+        match self {
+            Self::Single(c) => escalation_count_impl(&mut c.clone(), ip).await,
+            Self::Cluster(c) => escalation_count_impl(&mut c.clone(), ip).await,
+        }
     }
+}
+
+// Generic helpers over any `aio::ConnectionLike` (both ConnectionManager and the
+// async ClusterConnection implement it, so the command code is shared).
+async fn claim_spent_impl<C: redis::aio::ConnectionLike>(
+    conn: &mut C,
+    challenge_key: &str,
+    ttl: Duration,
+) -> Result<bool, redis::RedisError> {
+    let key = spent_key(challenge_key);
+    let res: Option<String> = redis::cmd("SET")
+        .arg(&key)
+        .arg("1")
+        .arg("NX")
+        .arg("EX")
+        .arg(ttl.as_secs())
+        .query_async(conn)
+        .await?;
+    Ok(res.is_some())
+}
+
+async fn ping_impl<C: redis::aio::ConnectionLike>(conn: &mut C) -> Result<(), redis::RedisError> {
+    redis::cmd("PING").query_async::<String>(conn).await?;
+    Ok(())
+}
+
+async fn record_escalation_impl<C: redis::aio::ConnectionLike>(
+    conn: &mut C,
+    ip: IpAddr,
+    ttl: Duration,
+) -> Result<u32, redis::RedisError> {
+    let key = escalation_key(ip);
+    let count: u32 = redis::cmd("INCR").arg(&key).query_async(conn).await?;
+    let _: () = redis::cmd("EXPIRE")
+        .arg(&key)
+        .arg(ttl.as_secs())
+        .query_async(conn)
+        .await?;
+    Ok(count)
+}
+
+async fn escalation_count_impl<C: redis::aio::ConnectionLike>(
+    conn: &mut C,
+    ip: IpAddr,
+) -> Result<u32, redis::RedisError> {
+    let key = escalation_key(ip);
+    let count: Option<u32> = redis::cmd("GET").arg(&key).query_async(conn).await?;
+    Ok(count.unwrap_or(0))
 }
 
 fn spent_key(challenge_key: &str) -> String {
@@ -96,10 +150,10 @@ fn escalation_key(ip: IpAddr) -> String {
 mod tests {
     use super::*;
 
-    /// Integration test against a real Redis at the default URL. Requires Redis
-    /// running locally (the service's only external stateful dependency).
+    /// Integration test against a real single-node Redis at the default URL.
+    /// (Cluster mode is exercised manually; CI would spin up a 3-node cluster.)
     async fn connect() -> ChallengeStore {
-        ChallengeStore::connect("redis://127.0.0.1:6379/0")
+        ChallengeStore::connect_single("redis://127.0.0.1:6379/0")
             .await
             .expect("Redis must be running at 127.0.0.1:6379 for this test")
     }
@@ -114,12 +168,10 @@ mod tests {
     async fn first_claim_wins_second_is_replay() {
         let store = connect().await;
         let key = format!("replay-test-{}", rand_suffix());
-        // First claim succeeds.
         assert!(store
             .claim_spent(&key, Duration::from_secs(30))
             .await
             .unwrap());
-        // Second claim on the same key is rejected as replay.
         assert!(!store
             .claim_spent(&key, Duration::from_secs(30))
             .await
@@ -166,7 +218,6 @@ mod tests {
     }
 
     fn rand_suffix() -> u64 {
-        // Cheap uniqueness so parallel runs / leftover keys don't collide.
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

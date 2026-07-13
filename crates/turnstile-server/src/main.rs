@@ -29,7 +29,10 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = Config::load(None)?;
     let bind_addr: SocketAddr = config.bind_addr.parse()?;
-    let store = ChallengeStore::connect(&config.redis_url).await?;
+    let store = match &config.cluster_urls {
+        Some(urls) => ChallengeStore::connect_cluster(urls).await?,
+        None => ChallengeStore::connect_single(&config.redis_url).await?,
+    };
     let state = AppState::new(config, store);
 
     // Per-IP rate limit, applied in production only — the test-facing `app()`

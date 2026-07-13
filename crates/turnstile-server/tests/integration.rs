@@ -18,6 +18,7 @@ fn test_config() -> Config {
     Config {
         bind_addr: "127.0.0.1:0".into(),
         redis_url: "redis://127.0.0.1:6379/0".into(),
+        cluster_urls: None,
         hmac_key: "integration-hmac-key".into(),
         jwt_key: "integration-jwt-key".into(),
         allowed_origins: vec!["https://example.com".into()],
@@ -32,7 +33,7 @@ fn test_config() -> Config {
 
 async fn setup() -> AppState {
     let cfg = test_config();
-    let store = ChallengeStore::connect(&cfg.redis_url)
+    let store = ChallengeStore::connect_single(&cfg.redis_url)
         .await
         .expect("Redis must be running at 127.0.0.1:6379");
     AppState::new(cfg, store)

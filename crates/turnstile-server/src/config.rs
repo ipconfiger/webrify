@@ -14,6 +14,9 @@ use serde::Deserialize;
 pub struct Config {
     pub bind_addr: String,
     pub redis_url: String,
+    /// Redis Cluster seed URLs. `Some` → cluster mode; `None` → single-node
+    /// (`redis_url`). Comma-separated in env, array in TOML.
+    pub cluster_urls: Option<Vec<String>>,
     pub hmac_key: String,
     pub jwt_key: String,
     pub allowed_origins: Vec<String>,
@@ -59,6 +62,8 @@ struct ConfigRaw {
     #[serde(default = "default_redis_url")]
     redis_url: String,
     #[serde(default)]
+    cluster_urls: Option<CommaList>,
+    #[serde(default)]
     hmac_key: String,
     #[serde(default)]
     jwt_key: String,
@@ -97,6 +102,7 @@ impl ConfigRaw {
         Ok(Config {
             bind_addr: self.bind_addr,
             redis_url: self.redis_url,
+            cluster_urls: self.cluster_urls.map(|c| c.0),
             hmac_key: self.hmac_key,
             jwt_key: self.jwt_key,
             allowed_origins: self.allowed_origins.0,
@@ -184,6 +190,7 @@ mod tests {
         ConfigRaw {
             bind_addr: default_bind_addr(),
             redis_url: default_redis_url(),
+            cluster_urls: None,
             hmac_key: "hk".into(),
             jwt_key: "jk".into(),
             allowed_origins: CommaList(
@@ -241,6 +248,7 @@ mod tests {
         let cfg = Config {
             bind_addr: "0.0.0.0:8080".into(),
             redis_url: "redis://db:6379".into(),
+            cluster_urls: None,
             hmac_key: "secret".into(),
             jwt_key: "jwt-secret".into(),
             allowed_origins: vec!["https://a.com".into(), "https://b.com".into()],
