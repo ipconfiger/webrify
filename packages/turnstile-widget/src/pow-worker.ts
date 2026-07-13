@@ -10,16 +10,19 @@ interface SolveRequest {
   difficulty: number;
   maxnumber: number;
   signalsJson: string;
+  fingerprintEnabled: boolean;
 }
 
 self.onmessage = async (e: MessageEvent<SolveRequest>) => {
-  const { challenge, difficulty, maxnumber, signalsJson } = e.data;
+  const { challenge, difficulty, maxnumber, signalsJson, fingerprintEnabled } =
+    e.data;
   try {
     await init();
-    // Hash the collected signals to a 128-bit fingerprint, then bind it into
-    // the PoW seed (seed = challenge || fingerprint) so the solution can't be
-    // shared across clients.
-    const fingerprint = fingerprint_hash(signalsJson);
+    // When fingerprinting is enabled, hash the signals and bind the result into
+    // the PoW seed (seed = challenge || fingerprint) so a solution can't be
+    // shared across clients. When disabled (GDPR PoW-only fallback), pass null
+    // and the wasm solves over the challenge bytes alone.
+    const fingerprint = fingerprintEnabled ? fingerprint_hash(signalsJson) : null;
     const nonce = solve_challenge(challenge, fingerprint, difficulty, maxnumber);
     (self as unknown as Worker).postMessage({ ok: true, nonce, fingerprint });
   } catch (err) {

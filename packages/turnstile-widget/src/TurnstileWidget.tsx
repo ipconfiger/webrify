@@ -10,6 +10,13 @@ export interface TurnstileOptions {
   onVerify: (token: string) => void;
   /** Called with a human-readable message on failure. */
   onError?: (message: string) => void;
+  /**
+   * Skip fingerprint collection entirely (PoW-only mode). Raw signals never
+   * leave the browser either way — but this avoids collecting them at all, the
+   * GDPR "no fingerprinting" / minimization fallback. The server accepts
+   * fingerprint-less verifications (PoW seed = challenge bytes only).
+   */
+  disableFingerprint?: boolean;
 }
 
 type Status = "idle" | "fetching" | "solving" | "verifying" | "success" | "error";
@@ -23,10 +30,13 @@ const LABELS: Record<Status, string> = {
   error: "Retry",
 };
 
+const BUSY: ReadonlySet<Status> = new Set(["fetching", "solving", "verifying"]);
+
 export function TurnstileWidget({
   endpoint = "",
   onVerify,
   onError,
+  disableFingerprint = false,
 }: TurnstileOptions) {
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState("");
@@ -35,7 +45,8 @@ export function TurnstileWidget({
   const solve = (
     challenge: Challenge,
     signalsJson: string,
-  ): Promise<{ nonce: number; fingerprint: string }> =>
+    fingerprintEnabled: boolean,
+  ): Promise<{ nonce: number; fingerprint: string | null }> =>
     new Promise((resolve, reject) => {
       const worker = new PowWorker();
       workerRef.current = worker;
@@ -43,7 +54,7 @@ export function TurnstileWidget({
         const data = e.data as {
           ok: boolean;
           nonce?: number;
-          fingerprint?: string;
+          fingerprint?: string | null;
           error?: string;
         };
         worker.terminate();
@@ -51,9 +62,9 @@ export function TurnstileWidget({
         if (
           data.ok &&
           typeof data.nonce === "number" &&
-          typeof data.fingerprint === "string"
+          (data.fingerprint === null || typeof data.fingerprint === "string")
         ) {
-          resolve({ nonce: data.nonce, fingerprint: data.fingerprint });
+          resolve({ nonce: data.nonce, fingerprint: data.fingerprint ?? null });
         } else {
           reject(new Error(data.error ?? "solve failed"));
         }
@@ -68,6 +79,7 @@ export function TurnstileWidget({
         difficulty: challenge.difficulty,
         maxnumber: challenge.maxnumber,
         signalsJson,
+        fingerprintEnabled,
       });
     });
 
@@ -79,10 +91,13 @@ export function TurnstileWidget({
       const challenge = (await chalRes.json()) as Challenge;
 
       setStatus("solving");
-      // Collect environment signals (raw signals never leave the browser; only
-      // their hash is sent). Then solve the fingerprint-bound PoW.
-      const signalsJson = await collectSignals();
-      const { nonce, fingerprint } = await solve(challenge, signalsJson);
+      const fingerprintEnabled = !disableFingerprint;
+      const signalsJson = fingerprintEnabled ? await collectSignals() : "";
+      const { nonce, fingerprint } = await solve(
+        challenge,
+        signalsJson,
+        fingerprintEnabled,
+      );
 
       setStatus("verifying");
       const verifyRes = await fetch(`${endpoint}/verify`, {
@@ -99,7 +114,7 @@ export function TurnstileWidget({
           signature: challenge.signature,
           nonce,
           idempotency_key: crypto.randomUUID(),
-          fingerprint,
+          ...(fingerprint !== null ? { fingerprint } : {}),
         }),
       });
       if (!verifyRes.ok) {
@@ -115,13 +130,15 @@ export function TurnstileWidget({
       setStatus("error");
       onError?.(msg);
     }
-  }, [endpoint, onVerify, onError]);
+  }, [endpoint, onVerify, onError, disableFingerprint]);
 
   return (
     <button
       type="button"
       onClick={run}
-      disabled={status !== "idle" && status !== "error"}
+      disabled={BUSY.has(status) || status === "success"}
+      aria-busy={BUSY.has(status)}
+      aria-live="polite"
       style={{
         fontFamily: "system-ui, sans-serif",
         fontSize: "14px",
@@ -130,9 +147,9 @@ export function TurnstileWidget({
         border: "1px solid #ccc",
         background: status === "success" ? "#e6f4ea" : "#fff",
         color: status === "error" ? "#d93025" : "#1f1f1f",
-        cursor: status === "idle" || status === "error" ? "pointer" : "default",
+        cursor:
+          status === "idle" || status === "error" ? "pointer" : "default",
       }}
-      aria-live="polite"
     >
       {LABELS[status]}
       {status === "error" && errorMsg ? ` — ${errorMsg}` : null}
