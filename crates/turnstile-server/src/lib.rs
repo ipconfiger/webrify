@@ -10,6 +10,7 @@ pub mod config;
 pub mod error;
 pub mod hmac;
 pub mod jwt;
+pub mod rate_limit;
 pub mod routes;
 pub mod state;
 pub mod store;
