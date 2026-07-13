@@ -1,0 +1,12 @@
+[package]
+name = "turnstile-wasm"
+version.workspace = true
+edition.workspace = true
+description = "WASM bindings for the Webrify Turnstile client engine"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+turnstile-core = { path = "../turnstile-core" }
+# Phase 1.11+: wasm-bindgen, js-sys, web-sys, serde-wasm-bindgen, console_error_panic_hook

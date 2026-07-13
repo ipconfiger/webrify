@@ -1,0 +1,24 @@
+[package]
+name = "turnstile-core"
+version.workspace = true
+edition.workspace = true
+description = "Platform-agnostic verification logic for Webrify Turnstile (WASM + native)"
+
+[dependencies]
+rand = "0.9"
+# Direct dep for the authoritative `TryRngCore` trait + `Error` type. rand 0.9's
+# `OsRng` only implements the fallible `TryRngCore` (OS entropy can fail); we
+# propagate errors rather than panicking (fail-closed on entropy failure).
+rand_core = "0.9"
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+ts-rs = "10"
+
+[dev-dependencies]
+serde_json = "1"
+
+# Enable getrandom's WASM JS backend when building for the browser target.
+# Feature unification propagates this to `rand`'s getrandom dependency, so
+# `OsRng` works on `wasm32-unknown-unknown` (via `crypto.getRandomValues`).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }

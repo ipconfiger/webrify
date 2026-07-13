@@ -1,0 +1,33 @@
+[package]
+name = "turnstile-server"
+version.workspace = true
+edition.workspace = true
+description = "Webrify Turnstile verification server (Axum)"
+
+[[bin]]
+name = "webrify"
+path = "src/main.rs"
+
+[dependencies]
+turnstile-core = { path = "../turnstile-core" }
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip", "compression-br"] }
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+figment = { version = "0.10", features = ["env", "toml"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2"
+jsonwebtoken = "9"
+thiserror = "2"
+hex = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Phase 1.10 (Wave C): rust-embed, mime_guess (widget asset serving)
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+http-body-util = "0.1"

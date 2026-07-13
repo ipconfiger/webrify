@@ -1,0 +1,5 @@
+# OpenCode / ripgrep ignore overrides.
+# `.slim/deepwork/` is git-ignored (session state, not for commit) but MUST
+# stay readable by OpenCode agents and search tools.
+!.slim/
+!.slim/**

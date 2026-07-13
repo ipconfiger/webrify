@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/turnstile-core",
+    "crates/turnstile-wasm",
+    "crates/turnstile-server",
+]
+# REVIEW BLOCKER fix: a bare `cargo build` must not try to compile the
+# wasm-only crate (which will pull wasm_bindgen / web-sys / js-sys that are
+# unbuildable for the native target). Only the server (+ its deps) is built
+# by default; `turnstile-wasm` is built via `wasm-pack`.
+default-members = ["crates/turnstile-server"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+# license: pending maintainer decision
+# rust-version: set during the first dependency-add phase
+
+[workspace.dependencies]
+# Shared dependencies are declared here and referenced by member crates as
+# `dep.workspace = true`. Populated incrementally per the plan (Phase 1.2+).
