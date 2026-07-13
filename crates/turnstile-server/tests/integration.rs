@@ -189,3 +189,50 @@ async fn wrong_nonce_is_rejected() {
     let (status, _) = solve_and_verify(&app, &challenge, None, Some(u64::MAX)).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn fingerprint_bound_flow_succeeds() {
+    // The client binds its fingerprint into the PoW seed (seed = challenge || fp),
+    // solves, and echoes the fingerprint in VerifyRequest. The server must rebuild
+    // the SAME seed and accept the solution.
+    let state = setup().await;
+    let app = app(state);
+    let (_, challenge) = fetch_challenge(&app, "https://example.com").await;
+    let challenge = challenge.expect("challenge body");
+
+    let fp = turnstile_core::fingerprint::hash(r#"{"canvas":"abc","ua":"test"}"#);
+    let fp_hex = hex::encode(fp);
+    let mut seed = hex::decode(&challenge.challenge).unwrap();
+    seed.extend_from_slice(&fp);
+    let nonce = pow::solve(&seed, challenge.difficulty);
+
+    let vr = VerifyRequest {
+        algorithm: challenge.algorithm.clone(),
+        challenge: challenge.challenge.clone(),
+        salt: challenge.salt.clone(),
+        difficulty: challenge.difficulty,
+        maxnumber: challenge.maxnumber,
+        expires_at: challenge.expires_at,
+        origin: challenge.origin.clone(),
+        signature: challenge.signature.clone(),
+        nonce,
+        idempotency_key: format!("idem-fp-{}", challenge.challenge),
+        fingerprint: Some(fp_hex),
+        behavior_score: None,
+    };
+    let req = Request::builder()
+        .method("POST")
+        .uri("/verify")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&vr).unwrap()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "fingerprint-bound verify should succeed"
+    );
+    let bytes = body_bytes(resp.into_body()).await;
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["success"], true);
+}

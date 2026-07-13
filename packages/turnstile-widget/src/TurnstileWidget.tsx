@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { collectSignals } from "./fingerprint";
 import PowWorker from "./pow-worker?worker";
 import type { Challenge, VerifyResponse } from "./types";
 
@@ -31,16 +32,31 @@ export function TurnstileWidget({
   const [errorMsg, setErrorMsg] = useState("");
   const workerRef = useRef<Worker | null>(null);
 
-  const solve = (challenge: Challenge): Promise<number> =>
+  const solve = (
+    challenge: Challenge,
+    signalsJson: string,
+  ): Promise<{ nonce: number; fingerprint: string }> =>
     new Promise((resolve, reject) => {
       const worker = new PowWorker();
       workerRef.current = worker;
       worker.onmessage = (e: MessageEvent) => {
-        const data = e.data as { ok: boolean; nonce?: number; error?: string };
+        const data = e.data as {
+          ok: boolean;
+          nonce?: number;
+          fingerprint?: string;
+          error?: string;
+        };
         worker.terminate();
         workerRef.current = null;
-        if (data.ok && typeof data.nonce === "number") resolve(data.nonce);
-        else reject(new Error(data.error ?? "solve failed"));
+        if (
+          data.ok &&
+          typeof data.nonce === "number" &&
+          typeof data.fingerprint === "string"
+        ) {
+          resolve({ nonce: data.nonce, fingerprint: data.fingerprint });
+        } else {
+          reject(new Error(data.error ?? "solve failed"));
+        }
       };
       worker.onerror = (e: ErrorEvent) => {
         worker.terminate();
@@ -51,6 +67,7 @@ export function TurnstileWidget({
         challenge: challenge.challenge,
         difficulty: challenge.difficulty,
         maxnumber: challenge.maxnumber,
+        signalsJson,
       });
     });
 
@@ -62,7 +79,10 @@ export function TurnstileWidget({
       const challenge = (await chalRes.json()) as Challenge;
 
       setStatus("solving");
-      const nonce = await solve(challenge);
+      // Collect environment signals (raw signals never leave the browser; only
+      // their hash is sent). Then solve the fingerprint-bound PoW.
+      const signalsJson = await collectSignals();
+      const { nonce, fingerprint } = await solve(challenge, signalsJson);
 
       setStatus("verifying");
       const verifyRes = await fetch(`${endpoint}/verify`, {
@@ -79,6 +99,7 @@ export function TurnstileWidget({
           signature: challenge.signature,
           nonce,
           idempotency_key: crypto.randomUUID(),
+          fingerprint,
         }),
       });
       if (!verifyRes.ok) {

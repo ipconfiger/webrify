@@ -20,7 +20,9 @@ pub fn init() {
 
 /// Solve the PoW.
 ///
-/// Hex-decodes `challenge_hex` to the seed bytes, then searches `[0, maxnumber]`
+/// Builds the canonical seed as `hex_decode(challenge_hex) || hex_decode(fingerprint_hex)`
+/// (the fingerprint makes the solution non-transferable across clients; pass
+/// `None` for the PoW-only / GDPR fallback path), then searches `[0, maxnumber]`
 /// for the smallest nonce such that `SHA-256(seed || nonce_be)` has `difficulty`
 /// leading zero bits.
 ///
@@ -31,14 +33,31 @@ pub fn init() {
 #[wasm_bindgen]
 pub fn solve_challenge(
     challenge_hex: &str,
+    fingerprint_hex: Option<String>,
     difficulty: u32,
     maxnumber: f64,
 ) -> Result<f64, JsValue> {
-    let seed = hex::decode(challenge_hex).map_err(js_err)?;
+    let mut seed = hex::decode(challenge_hex).map_err(js_err)?;
+    if let Some(fp_hex) = fingerprint_hex {
+        let fp = hex::decode(&fp_hex).map_err(js_err)?;
+        seed.extend_from_slice(&fp);
+    }
     let cap = maxnumber as u64;
     let nonce = turnstile_core::pow::solve_bounded(&seed, difficulty, cap)
         .ok_or_else(|| JsValue::from_str("no PoW solution within maxnumber"))?;
     Ok(nonce as f64)
+}
+
+/// Compute the 128-bit browser fingerprint (lowercase hex) of a canonical
+/// signal string.
+///
+/// The widget collects environment signals (Canvas/WebGL/Audio/fonts/navigator)
+/// into a canonical JSON string with sorted keys and passes it here. The
+/// returned 16-byte hash is bound into the PoW seed and sent to the server for
+/// risk scoring; raw signals never leave the client (GDPR minimization).
+#[wasm_bindgen]
+pub fn fingerprint_hash(signals_json: &str) -> String {
+    hex::encode(turnstile_core::fingerprint::hash(signals_json))
 }
 
 fn js_err<E: std::fmt::Display>(e: E) -> JsValue {

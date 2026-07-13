@@ -77,9 +77,17 @@ pub async fn verify(
         return Err(AppError::ChallengeAlreadyUsed);
     }
 
-    // 5. PoW re-verify: seed = hex-decoded challenge bytes.
-    let seed = hex::decode(&req.challenge)
+    // 5. PoW re-verify. Canonical seed = hex(challenge) || hex(fingerprint).
+    // Binding the fingerprint makes a solution non-transferable across clients
+    // (each distinct environment must do its own work). `None` — the PoW-only /
+    // GDPR fallback path — falls back to the challenge bytes alone.
+    let mut seed = hex::decode(&req.challenge)
         .map_err(|_| AppError::BadRequest("malformed challenge hex".into()))?;
+    if let Some(fp_hex) = &req.fingerprint {
+        let fp = hex::decode(fp_hex)
+            .map_err(|_| AppError::BadRequest("malformed fingerprint hex".into()))?;
+        seed.extend_from_slice(&fp);
+    }
     if !pow::verify(&seed, req.nonce, req.difficulty) {
         return Err(AppError::VerifyFailed);
     }

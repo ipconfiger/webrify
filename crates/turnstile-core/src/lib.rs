@@ -9,9 +9,11 @@
 //! - [`rng`]: OS-backed cryptographic randomness (challenges, salts, ids).
 //! - [`pow`]: Hashcash SHA-256 proof-of-work solver and verifier.
 //! - [`protocol`]: wire types for the challenge/verify flow.
+//! - [`fingerprint`]: 128-bit browser-fingerprint hashing (signals → stable id).
 
 #![forbid(unsafe_code)]
 
+pub mod fingerprint;
 pub mod pow;
 pub mod protocol;
 pub mod rng;
