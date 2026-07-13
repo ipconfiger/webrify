@@ -34,8 +34,13 @@ run:
 build-wasm:
     wasm-pack build crates/turnstile-wasm --target web --out-dir pkg
 
-# Build the frontend widget (Phase 1.12).
+# Build the frontend widget (Phase 1.12). Copies the wasm pkg in first so the
+# widget build is self-contained, then runs vite build.
 build-widget:
+    mkdir -p packages/turnstile-widget/wasm
+    cp crates/turnstile-wasm/pkg/turnstile_wasm.js packages/turnstile-widget/wasm/
+    cp crates/turnstile-wasm/pkg/turnstile_wasm_bg.wasm packages/turnstile-widget/wasm/
+    cp crates/turnstile-wasm/pkg/turnstile_wasm.d.ts packages/turnstile-widget/wasm/
     cd packages/turnstile-widget && npm run build
 
 # Full ordered build (Phase 1.10+): wasm -> widget -> server.

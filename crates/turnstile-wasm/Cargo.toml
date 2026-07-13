@@ -9,4 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 turnstile-core = { path = "../turnstile-core" }
-# Phase 1.11+: wasm-bindgen, js-sys, web-sys, serde-wasm-bindgen, console_error_panic_hook
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+hex = "0.4"
+# Phase 2 (fingerprinting): serde, serde-wasm-bindgen, js-sys, web-sys

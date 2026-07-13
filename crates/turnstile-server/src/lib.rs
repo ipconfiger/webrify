@@ -1,9 +1,8 @@
 //! Webrify Turnstile verification server (Axum).
 //!
 //! Self-hosted, single-tenant. The frontend widget is embedded into this
-//! binary (Phase 1.10 / Wave C); the only external stateful dependency is Redis.
-//!
-//! Compose the app via [`app`]; [`main`] boots it.
+//! binary via `rust-embed` (see [`routes::widget`]); the only external
+//! stateful dependency is Redis. Compose the app via [`app`]; `main` boots it.
 
 #![forbid(unsafe_code)]
 
@@ -15,22 +14,24 @@ pub mod routes;
 pub mod state;
 pub mod store;
 
-use std::sync::Arc;
-
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::Router;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::state::AppState;
 
-/// Build the full application router with CORS + tracing layers, ready to serve.
+/// Build the full application router with compression + CORS + tracing layers,
+/// ready to serve. Compression (brotli/gzip) applies to `/widget/*` — the
+/// embedded JS/WASM text assets compress well.
 pub fn app(state: AppState) -> Router {
     let cors = build_cors(&state.config.allowed_origins);
     routes::router()
         .with_state(state)
         .layer(TraceLayer::new_for_http())
         .layer(cors)
+        .layer(CompressionLayer::new())
 }
 
 fn build_cors(allowed: &[String]) -> CorsLayer {
@@ -43,7 +44,3 @@ fn build_cors(allowed: &[String]) -> CorsLayer {
             HeaderName::from_static("origin"),
         ])
 }
-
-// Re-export so `main` and tests can reference a single app-wide handle if needed.
-#[allow(dead_code)] // referenced by tests / future siteverify endpoint
-type Shared = Arc<()>;

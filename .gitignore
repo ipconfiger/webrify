@@ -12,6 +12,8 @@ node_modules/
 packages/turnstile-widget/dist/*
 !packages/turnstile-widget/dist/.gitkeep
 !packages/turnstile-widget/dist/index.html
+# wasm pkg copied into the widget by the build-widget recipe (regenerated)
+packages/turnstile-widget/wasm/
 
 # wasm-pack output
 /pkg/
@@ -21,6 +23,9 @@ crates/*/bindings/
 
 # Deepwork orchestrator session state (not committed; readable via .ignore)
 .slim/deepwork/
+
+# Playwright MCP artifacts (browser snapshots/screenshots from E2E runs)
+.playwright-mcp/
 
 # Editor / OS
 .idea/
