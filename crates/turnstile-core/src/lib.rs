@@ -11,9 +11,11 @@
 //! - [`protocol`]: wire types for the challenge/verify flow.
 //! - [`fingerprint`]: 128-bit browser-fingerprint hashing (signals → stable id).
 //! - [`risk`]: composite risk scoring (signals → score + allow/escalate/deny).
+//! - [`behavior`]: human-likeness scoring from interaction telemetry.
 
 #![forbid(unsafe_code)]
 
+pub mod behavior;
 pub mod fingerprint;
 pub mod pow;
 pub mod protocol;
