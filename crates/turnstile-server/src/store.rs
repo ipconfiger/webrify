@@ -6,6 +6,7 @@
 //! both pass (TOCTOU-safe). Redis failures propagate so the caller fails CLOSED
 //! (verification refused, never silently bypassed).
 
+use std::net::IpAddr;
 use std::time::Duration;
 
 use redis::aio::ConnectionManager;
@@ -52,10 +53,43 @@ impl ChallengeStore {
         redis::cmd("PING").query_async::<String>(&mut conn).await?;
         Ok(())
     }
+
+    /// Record a risk-escalation event for `ip` (used by adaptive difficulty).
+    /// Each call INCRements a per-IP counter and refreshes its TTL. Returns the
+    /// new count. Redis failures propagate (fail-closed: on error the caller
+    /// skips adaptive bump rather than refusing the request).
+    pub async fn record_escalation(
+        &self,
+        ip: IpAddr,
+        ttl: Duration,
+    ) -> Result<u32, redis::RedisError> {
+        let mut conn = self.conn.clone();
+        let key = escalation_key(ip);
+        let count: u32 = redis::cmd("INCR").arg(&key).query_async(&mut conn).await?;
+        let _: () = redis::cmd("EXPIRE")
+            .arg(&key)
+            .arg(ttl.as_secs())
+            .query_async(&mut conn)
+            .await?;
+        Ok(count)
+    }
+
+    /// How many recent escalations has this IP accumulated? 0 = clean (or
+    /// never seen, or Redis returned nil for the key).
+    pub async fn escalation_count(&self, ip: IpAddr) -> Result<u32, redis::RedisError> {
+        let mut conn = self.conn.clone();
+        let key = escalation_key(ip);
+        let count: Option<u32> = redis::cmd("GET").arg(&key).query_async(&mut conn).await?;
+        Ok(count.unwrap_or(0))
+    }
 }
 
 fn spent_key(challenge_key: &str) -> String {
     format!("webrify:spent:{challenge_key}")
+}
+
+fn escalation_key(ip: IpAddr) -> String {
+    format!("webrify:escalation:{ip}")
 }
 
 #[cfg(test)]
@@ -105,6 +139,30 @@ mod tests {
             .claim_spent(&k2, Duration::from_secs(30))
             .await
             .unwrap());
+    }
+
+    #[tokio::test]
+    async fn escalation_counter_increments_and_reads() {
+        let store = connect().await;
+        let ip: IpAddr = format!("198.51.100.{}", rand_suffix() % 200)
+            .parse()
+            .unwrap();
+        assert_eq!(store.escalation_count(ip).await.unwrap(), 0);
+        assert_eq!(
+            store
+                .record_escalation(ip, Duration::from_secs(60))
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .record_escalation(ip, Duration::from_secs(60))
+                .await
+                .unwrap(),
+            2
+        );
+        assert_eq!(store.escalation_count(ip).await.unwrap(), 2);
     }
 
     fn rand_suffix() -> u64 {

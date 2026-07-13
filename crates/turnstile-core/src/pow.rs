@@ -86,6 +86,19 @@ pub fn solve_bounded(seed: &[u8], difficulty: u32, maxnumber: u64) -> Option<u64
     (0..=maxnumber).find(|&nonce| verify(seed, nonce, difficulty))
 }
 
+/// Maximum additional difficulty bits from risk escalation (Phase 3c adaptive).
+const MAX_ESCALATION_BITS: u32 = 6;
+/// Absolute difficulty cap so a flagged client can't be locked out indefinitely.
+const DIFFICULTY_CAP: u32 = 24;
+
+/// Compute the effective difficulty, escalating by up to [`MAX_ESCALATION_BITS`]
+/// based on the client's recent risk-escalation count, capped at
+/// [`DIFFICULTY_CAP`]. Each bit roughly doubles the PoW cost, so repeat
+/// offenders pay exponentially more without ever being fully locked out.
+pub fn adjust_difficulty(base: u32, escalations: u32) -> u32 {
+    (base + escalations.min(MAX_ESCALATION_BITS)).min(DIFFICULTY_CAP)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,6 +124,17 @@ mod tests {
         assert!(verify(seed, 0, 0));
         assert!(verify(seed, 42, 0));
         assert!(verify(seed, u64::MAX, 0));
+    }
+
+    #[test]
+    fn adjust_difficulty_escalates_then_caps() {
+        assert_eq!(adjust_difficulty(14, 0), 14);
+        assert_eq!(adjust_difficulty(14, 3), 17);
+        // Bump is capped at MAX_ESCALATION_BITS (6).
+        assert_eq!(adjust_difficulty(14, 100), 20);
+        // And the total is capped at DIFFICULTY_CAP (24).
+        assert_eq!(adjust_difficulty(20, 10), 24);
+        assert_eq!(adjust_difficulty(30, 0), 24);
     }
 
     #[test]

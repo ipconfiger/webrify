@@ -22,6 +22,7 @@ use turnstile_core::protocol::VerifyRequest;
 use turnstile_core::rng;
 
 use crate::error::{AppError, AppResult};
+use crate::extract::OptionalConnectInfo;
 use crate::hmac;
 use crate::jwt;
 use crate::state::AppState;
@@ -39,6 +40,7 @@ pub fn router() -> Router<AppState> {
 
 pub async fn verify(
     State(state): State<AppState>,
+    peer: OptionalConnectInfo,
     Json(req): Json<VerifyRequest>,
 ) -> AppResult<Json<VerifyResponse>> {
     let cfg = &state.config;
@@ -108,7 +110,19 @@ pub async fn verify(
         behavior_score: req.behavior_score,
     });
     tracing::debug!(risk_score = risk.score, decision = ?risk.decision, "risk evaluated");
-    if matches!(risk.decision, turnstile_core::risk::Decision::Deny) {
+    // Adaptive difficulty (Phase 3c): record an escalation for this peer so the
+    // next /challenge is harder. Best-effort — Redis-down doesn't fail the
+    // request (fail-open on tracking; verification is already fail-closed).
+    use turnstile_core::risk::Decision;
+    if matches!(risk.decision, Decision::Escalate | Decision::Deny) {
+        if let Some(addr) = peer.0 {
+            let _ = state
+                .store
+                .record_escalation(addr.ip(), Duration::from_secs(cfg.challenge_ttl_secs * 6))
+                .await;
+        }
+    }
+    if matches!(risk.decision, Decision::Deny) {
         return Err(AppError::VerifyFailed);
     }
 

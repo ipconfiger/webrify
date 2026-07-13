@@ -8,6 +8,7 @@
 
 pub mod config;
 pub mod error;
+pub mod extract;
 pub mod hmac;
 pub mod jwt;
 pub mod rate_limit;

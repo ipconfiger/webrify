@@ -1,8 +1,9 @@
-//! `POST /api/v1/challenge` — mint an HMAC-signed challenge.
+//! `POST /challenge` — mint an HMAC-signed challenge.
 //!
 //! Validates the request `Origin` against the allowlist BEFORE signing, so the
 //! signature can only ever bind an allowed origin (defense at issuance, not just
-//! at verify).
+//! at verify). Difficulty is adaptive (Phase 3c): peers with recent risk
+//! escalations get a harder challenge (up to the cap in `pow::adjust_difficulty`).
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -10,10 +11,12 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::routing::post;
 use axum::{Json, Router};
+use turnstile_core::pow;
 use turnstile_core::protocol::Challenge;
 use turnstile_core::rng;
 
 use crate::error::{AppError, AppResult};
+use crate::extract::OptionalConnectInfo;
 use crate::hmac;
 use crate::state::AppState;
 
@@ -23,6 +26,7 @@ pub fn router() -> Router<AppState> {
 
 pub async fn create(
     State(state): State<AppState>,
+    peer: OptionalConnectInfo,
     headers: HeaderMap,
 ) -> AppResult<Json<Challenge>> {
     let origin = origin_header(&headers)?.to_string();
@@ -31,6 +35,15 @@ pub async fn create(
     }
 
     let cfg = &state.config;
+    // Adaptive difficulty: bump for peers with recent risk escalations. `None`
+    // (tests, no ConnectInfo) → base difficulty. The lookup is best-effort — a
+    // Redis blip falls back to the base, never fails the request.
+    let escalations = match peer.0 {
+        Some(addr) => state.store.escalation_count(addr.ip()).await.unwrap_or(0),
+        None => 0,
+    };
+    let difficulty = pow::adjust_difficulty(cfg.difficulty, escalations);
+
     let salt = hex::encode(rng::random_bytes(16).map_err(AppError::internal)?);
     let seed = rng::challenge_seed().map_err(AppError::internal)?;
     let challenge_hex = hex::encode(seed);
@@ -41,7 +54,7 @@ pub async fn create(
         "SHA-256",
         &salt,
         &challenge_hex,
-        cfg.difficulty,
+        difficulty,
         cfg.maxnumber,
         expires_at,
         &origin,
@@ -52,7 +65,7 @@ pub async fn create(
         algorithm: "SHA-256".to_string(),
         salt,
         challenge: challenge_hex,
-        difficulty: cfg.difficulty,
+        difficulty,
         maxnumber: cfg.maxnumber,
         expires_at,
         origin,
