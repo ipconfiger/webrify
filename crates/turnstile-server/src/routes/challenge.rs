@@ -43,6 +43,7 @@ pub async fn create(
         None => 0,
     };
     let difficulty = pow::adjust_difficulty(cfg.difficulty, escalations);
+    state.metrics.inc_challenges_issued();
 
     let salt = hex::encode(rng::random_bytes(16).map_err(AppError::internal)?);
     let seed = rng::challenge_seed().map_err(AppError::internal)?;

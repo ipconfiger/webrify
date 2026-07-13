@@ -14,6 +14,7 @@ use turnstile_server::{
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
+        .json()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 

@@ -43,6 +43,21 @@ pub async fn verify(
     peer: OptionalConnectInfo,
     Json(req): Json<VerifyRequest>,
 ) -> AppResult<Json<VerifyResponse>> {
+    // Count every outcome (success vs failed) in one place — the inner function
+    // holds the actual verification logic and may return early from any step.
+    let result = verify_inner(&state, peer, req).await;
+    match &result {
+        Ok(_) => state.metrics.inc_verifies_success(),
+        Err(_) => state.metrics.inc_verifies_failed(),
+    }
+    result
+}
+
+async fn verify_inner(
+    state: &AppState,
+    peer: OptionalConnectInfo,
+    req: VerifyRequest,
+) -> AppResult<Json<VerifyResponse>> {
     let cfg = &state.config;
 
     // 1. HMAC re-verify (constant-time) over all binding fields.

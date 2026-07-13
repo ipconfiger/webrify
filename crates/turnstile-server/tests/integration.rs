@@ -114,6 +114,26 @@ async fn health_and_ready() {
 }
 
 #[tokio::test]
+async fn metrics_endpoint_reports_counters() {
+    let state = setup().await;
+    let app = app(state);
+    // Issue + verify once so the counters are non-zero.
+    let (_, challenge) = fetch_challenge(&app, "https://example.com").await;
+    let challenge = challenge.expect("challenge body");
+    let _ = solve_and_verify(&app, &challenge, None, None).await;
+
+    let resp = app
+        .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let text = String::from_utf8(body_bytes(resp.into_body()).await).unwrap();
+    assert!(text.contains("webrify_challenges_issued_total 1"), "{text}");
+    assert!(text.contains("result=\"success\"} 1"), "{text}");
+    assert!(text.contains("# TYPE webrify_verifies_total counter"));
+}
+
+#[tokio::test]
 async fn full_flow_succeeds_and_issues_token() {
     let state = setup().await;
     let app = app(state);
