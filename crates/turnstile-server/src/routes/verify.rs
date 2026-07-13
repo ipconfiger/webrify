@@ -105,7 +105,7 @@ pub async fn verify(
         challenge_passed: true,
         fingerprint_blacklisted: false,
         solve_time_ms: None,
-        behavior_score: None,
+        behavior_score: req.behavior_score,
     });
     tracing::debug!(risk_score = risk.score, decision = ?risk.decision, "risk evaluated");
     if matches!(risk.decision, turnstile_core::risk::Decision::Deny) {

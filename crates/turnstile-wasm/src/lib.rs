@@ -60,6 +60,36 @@ pub fn fingerprint_hash(signals_json: &str) -> String {
     hex::encode(turnstile_core::fingerprint::hash(signals_json))
 }
 
+/// Human-likeness behavior score in `[0, 100]` (higher = more human), or `null`
+/// if there's too little interaction signal to judge.
+///
+/// `mouse` is a flat array of `[x, y, t_ms]` triples; `click_intervals_ms` and
+/// `key_intervals_ms` are arrays of inter-event intervals in ms. Any may be
+/// empty — the scorer degrades gracefully. Computed in WASM so the canonical
+/// CV-based logic lives in one place (`turnstile_core::behavior`).
+#[wasm_bindgen]
+pub fn behavior_score(
+    mouse: &js_sys::Float64Array,
+    click_intervals_ms: &js_sys::Float64Array,
+    key_intervals_ms: &js_sys::Float64Array,
+) -> Option<u32> {
+    use turnstile_core::behavior::{BehaviorInput, MouseSample};
+    let mouse: Vec<MouseSample> = mouse
+        .to_vec()
+        .chunks_exact(3)
+        .map(|c| MouseSample {
+            x: c[0],
+            y: c[1],
+            t_ms: c[2],
+        })
+        .collect();
+    turnstile_core::behavior::score(&BehaviorInput {
+        mouse,
+        click_intervals_ms: click_intervals_ms.to_vec(),
+        key_intervals_ms: key_intervals_ms.to_vec(),
+    })
+}
+
 fn js_err<E: std::fmt::Display>(e: E) -> JsValue {
     JsValue::from_str(&e.to_string())
 }

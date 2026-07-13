@@ -75,8 +75,11 @@ pub struct VerifyRequest {
     pub idempotency_key: String,
     /// Optional client-computed fingerprint hash (default TS mapping: `string | null`).
     pub fingerprint: Option<String>,
-    /// Optional client-computed behavior score in `[0.0, 1.0]` (higher = more human-like).
-    pub behavior_score: Option<f32>,
+    /// Optional client-computed behavior score in `[0, 100]` (higher = more
+    /// human-like; derived from mouse/click/keystroke CV analysis). Omitted
+    /// (`None`) when too little interaction signal was captured.
+    #[ts(type = "number")]
+    pub behavior_score: Option<u32>,
 }
 
 /// JWT body issued by the server after a successful verification.
@@ -134,7 +137,7 @@ mod tests {
             nonce: 4721,
             idempotency_key: "550e8400-e29b-41d4-a716-446655440000".into(),
             fingerprint: Some("fp-hash".into()),
-            behavior_score: Some(0.82),
+            behavior_score: Some(82),
         }
     }
 

@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { BehaviorRecorder, type BehaviorSnapshot } from "./behavior";
 import { collectSignals } from "./fingerprint";
 import PowWorker from "./pow-worker?worker";
 import type { Challenge, VerifyResponse } from "./types";
@@ -32,6 +33,12 @@ const LABELS: Record<Status, string> = {
 
 const BUSY: ReadonlySet<Status> = new Set(["fetching", "solving", "verifying"]);
 
+const EMPTY_BEHAVIOR: BehaviorSnapshot = {
+  mouse: new Float64Array(0),
+  clickIntervals: new Float64Array(0),
+  keyIntervals: new Float64Array(0),
+};
+
 export function TurnstileWidget({
   endpoint = "",
   onVerify,
@@ -41,12 +48,30 @@ export function TurnstileWidget({
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const workerRef = useRef<Worker | null>(null);
+  const behaviorRef = useRef<BehaviorRecorder | null>(null);
+
+  // Record interaction telemetry from mount until unmount — the longer the user
+  // is on the page before clicking, the richer the behavior signal.
+  useEffect(() => {
+    const recorder = new BehaviorRecorder();
+    behaviorRef.current = recorder;
+    recorder.start();
+    return () => {
+      recorder.stop();
+      behaviorRef.current = null;
+    };
+  }, []);
 
   const solve = (
     challenge: Challenge,
     signalsJson: string,
     fingerprintEnabled: boolean,
-  ): Promise<{ nonce: number; fingerprint: string | null }> =>
+    behavior: BehaviorSnapshot,
+  ): Promise<{
+    nonce: number;
+    fingerprint: string | null;
+    behaviorScore: number | null;
+  }> =>
     new Promise((resolve, reject) => {
       const worker = new PowWorker();
       workerRef.current = worker;
@@ -55,6 +80,7 @@ export function TurnstileWidget({
           ok: boolean;
           nonce?: number;
           fingerprint?: string | null;
+          behaviorScore?: number | null;
           error?: string;
         };
         worker.terminate();
@@ -62,9 +88,16 @@ export function TurnstileWidget({
         if (
           data.ok &&
           typeof data.nonce === "number" &&
-          (data.fingerprint === null || typeof data.fingerprint === "string")
+          (data.fingerprint === null || typeof data.fingerprint === "string") &&
+          (data.behaviorScore === null ||
+            data.behaviorScore === undefined ||
+            typeof data.behaviorScore === "number")
         ) {
-          resolve({ nonce: data.nonce, fingerprint: data.fingerprint ?? null });
+          resolve({
+            nonce: data.nonce,
+            fingerprint: data.fingerprint ?? null,
+            behaviorScore: data.behaviorScore ?? null,
+          });
         } else {
           reject(new Error(data.error ?? "solve failed"));
         }
@@ -74,13 +107,25 @@ export function TurnstileWidget({
         workerRef.current = null;
         reject(new Error(e.message || "worker error"));
       };
-      worker.postMessage({
-        challenge: challenge.challenge,
-        difficulty: challenge.difficulty,
-        maxnumber: challenge.maxnumber,
-        signalsJson,
-        fingerprintEnabled,
-      });
+      // Transfer the underlying ArrayBuffers (zero-copy) — they're freshly
+      // snapshotted, so detaching on the main thread is fine.
+      worker.postMessage(
+        {
+          challenge: challenge.challenge,
+          difficulty: challenge.difficulty,
+          maxnumber: challenge.maxnumber,
+          signalsJson,
+          fingerprintEnabled,
+          mouse: behavior.mouse,
+          clickIntervals: behavior.clickIntervals,
+          keyIntervals: behavior.keyIntervals,
+        },
+        [
+          behavior.mouse.buffer,
+          behavior.clickIntervals.buffer,
+          behavior.keyIntervals.buffer,
+        ],
+      );
     });
 
   const run = useCallback(async () => {
@@ -93,10 +138,12 @@ export function TurnstileWidget({
       setStatus("solving");
       const fingerprintEnabled = !disableFingerprint;
       const signalsJson = fingerprintEnabled ? await collectSignals() : "";
-      const { nonce, fingerprint } = await solve(
+      const behavior = behaviorRef.current?.snapshot() ?? EMPTY_BEHAVIOR;
+      const { nonce, fingerprint, behaviorScore } = await solve(
         challenge,
         signalsJson,
         fingerprintEnabled,
+        behavior,
       );
 
       setStatus("verifying");
@@ -115,6 +162,7 @@ export function TurnstileWidget({
           nonce,
           idempotency_key: crypto.randomUUID(),
           ...(fingerprint !== null ? { fingerprint } : {}),
+          ...(behaviorScore !== null ? { behavior_score: behaviorScore } : {}),
         }),
       });
       if (!verifyRes.ok) {
