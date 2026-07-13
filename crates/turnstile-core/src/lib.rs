@@ -10,10 +10,12 @@
 //! - [`pow`]: Hashcash SHA-256 proof-of-work solver and verifier.
 //! - [`protocol`]: wire types for the challenge/verify flow.
 //! - [`fingerprint`]: 128-bit browser-fingerprint hashing (signals → stable id).
+//! - [`risk`]: composite risk scoring (signals → score + allow/escalate/deny).
 
 #![forbid(unsafe_code)]
 
 pub mod fingerprint;
 pub mod pow;
 pub mod protocol;
+pub mod risk;
 pub mod rng;

@@ -97,7 +97,22 @@ pub async fn verify(
         return Err(AppError::VerifyFailed);
     }
 
-    // 7. Issue JWT (jti = fresh 128-bit random).
+    // 7. Risk scoring (v1). Currently every signal is None/false at verify
+    // time (behavior arrives in Phase 3; server-side solve-timing + reputation
+    // in Phase 4), so this resolves to Allow(0). The hook + structured log are
+    // in place so filling the inputs later needs no call-site change.
+    let risk = turnstile_core::risk::evaluate(&turnstile_core::risk::RiskInput {
+        challenge_passed: true,
+        fingerprint_blacklisted: false,
+        solve_time_ms: None,
+        behavior_score: None,
+    });
+    tracing::debug!(risk_score = risk.score, decision = ?risk.decision, "risk evaluated");
+    if matches!(risk.decision, turnstile_core::risk::Decision::Deny) {
+        return Err(AppError::VerifyFailed);
+    }
+
+    // 8. Issue JWT (jti = fresh 128-bit random).
     let jti = hex::encode(rng::random_bytes(16).map_err(AppError::internal)?);
     let exp = now + cfg.jwt_ttl_secs as i64;
     let claims = jwt::claims_for(&req.origin, &jti, exp);
