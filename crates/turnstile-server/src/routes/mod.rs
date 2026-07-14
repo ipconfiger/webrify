@@ -9,6 +9,7 @@ pub mod challenge;
 pub mod demo;
 pub mod health;
 pub mod metrics;
+pub mod siteverify;
 pub mod verify;
 pub mod widget;
 
@@ -18,6 +19,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .merge(challenge::router())
         .merge(verify::router())
+        .merge(siteverify::router())
         .merge(health::router())
         .merge(widget::router())
         .merge(demo::router())

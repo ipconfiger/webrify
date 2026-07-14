@@ -31,6 +31,22 @@ pub fn issue(secret: &[u8], claims: &JwtClaims) -> JwtResult<String> {
     )
 }
 
+/// Verify a JWT (HS256): signature, expiry, issuer (`"webrify"`), and — when
+/// `expected_origin` is `Some` — that `aud` matches it. Returns the claims on
+/// success. Powers `/siteverify` so relying-app backends can validate a token
+/// without holding the HMAC signing secret themselves.
+pub fn verify(secret: &[u8], token: &str, expected_origin: Option<&str>) -> JwtResult<JwtClaims> {
+    use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.set_issuer(&["webrify"]);
+    match expected_origin {
+        Some(origin) => validation.set_audience(&[origin]),
+        None => validation.validate_aud = false,
+    }
+    let data = decode::<JwtClaims>(token, &DecodingKey::from_secret(secret), &validation)?;
+    Ok(data.claims)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,5 +91,22 @@ mod tests {
         assert_eq!(c.jti, "jti-9");
         assert_eq!(c.origin, "https://webrify.test");
         assert_eq!(c.exp, 123);
+    }
+
+    #[test]
+    fn verify_round_trips_and_rejects() {
+        let claims = claims_for(AUD, "v-1", 4_102_444_800);
+        let token = issue(SECRET, &claims).unwrap();
+        // valid + correct origin
+        let c = verify(SECRET, &token, Some(AUD)).unwrap();
+        assert_eq!(c.origin, AUD);
+        // valid + no origin check
+        assert!(verify(SECRET, &token, None).is_ok());
+        // wrong origin → reject
+        assert!(verify(SECRET, &token, Some("https://other.com")).is_err());
+        // wrong secret → reject
+        assert!(verify(b"other-secret", &token, Some(AUD)).is_err());
+        // garbage → reject
+        assert!(verify(SECRET, "not.a.jwt", None).is_err());
     }
 }
