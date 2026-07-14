@@ -1,0 +1,34 @@
+# Webrify Turnstile — docker-compose orchestration.
+#
+# All config lives in environment variables (WEBRIFY_ prefix).
+# Required vars: HMAC_KEY, JWT_KEY, ALLOWED_ORIGINS.
+# Start:  docker-compose up -d
+
+services:
+  webrify:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: webrify:latest
+    container_name: webrify
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+    environment:
+      # ── Required: generate your own secrets in production ────────────
+      WEBRIFY_HMAC_KEY: "a6c57f5eed9adf57597655b023d56b12c81eeae3980c803f5585715cc53d0604"
+      WEBRIFY_JWT_KEY: "104c488a0f6eff387376d25c6b4d815467d553d92a2952b967b68df58f4d0d87"
+      WEBRIFY_ALLOWED_ORIGINS: "*"
+
+      # ── Redis (embedded, no external service needed) ─────────────────
+      # WEBRIFY_REDIS_URL defaults to redis://127.0.0.1:6379/0
+      # (already correct for the embedded redis in the container).
+
+      # ── Optional overrides ──────────────────────────────────────────
+      # WEBRIFY_BIND_ADDR: "0.0.0.0:3000"
+      # WEBRIFY_DIFFICULTY: "14"
+      # WEBRIFY_MAXNUMBER: "100000"
+      # WEBRIFY_CHALLENGE_TTL_SECS: "300"
+      # WEBRIFY_JWT_TTL_SECS: "900"
+      # WEBRIFY_ALLOW_JS_DISABLED: "false"

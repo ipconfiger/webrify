@@ -21,7 +21,7 @@ pub mod store;
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::Router;
 use tower_http::compression::CompressionLayer;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use crate::state::AppState;
@@ -39,9 +39,14 @@ pub fn app(state: AppState) -> Router {
 }
 
 fn build_cors(allowed: &[String]) -> CorsLayer {
-    let origins: Vec<HeaderValue> = allowed.iter().filter_map(|o| o.parse().ok()).collect();
+    let origin_layer = if allowed.iter().any(|o| o == "*") {
+        AllowOrigin::any()
+    } else {
+        let origins: Vec<HeaderValue> = allowed.iter().filter_map(|o| o.parse().ok()).collect();
+        AllowOrigin::list(origins)
+    };
     CorsLayer::new()
-        .allow_origin(origins)
+        .allow_origin(origin_layer)
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([
             HeaderName::from_static("content-type"),

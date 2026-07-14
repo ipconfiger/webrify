@@ -1,0 +1,29 @@
+# Rust build artifacts
+target/
+.cargo/
+
+# Node / widget artifacts
+packages/turnstile-widget/node_modules/
+packages/turnstile-widget/dist/
+
+# WASM build artifacts
+crates/turnstile-wasm/pkg/
+
+# Git
+.git/
+.gitignore
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml

@@ -64,14 +64,16 @@ pub fn fingerprint_hash(signals_json: &str) -> String {
 /// if there's too little interaction signal to judge.
 ///
 /// `mouse` is a flat array of `[x, y, t_ms]` triples; `click_intervals_ms` and
-/// `key_intervals_ms` are arrays of inter-event intervals in ms. Any may be
+/// `key_intervals_ms` are arrays of inter-event intervals in ms;
+/// `click_positions` is a flat array of `[x, y]` pairs. Any may be
 /// empty — the scorer degrades gracefully. Computed in WASM so the canonical
-/// CV-based logic lives in one place (`turnstile_core::behavior`).
+/// logic lives in one place (`turnstile_core::behavior`).
 #[wasm_bindgen]
 pub fn behavior_score(
     mouse: &js_sys::Float64Array,
     click_intervals_ms: &js_sys::Float64Array,
     key_intervals_ms: &js_sys::Float64Array,
+    click_positions: &js_sys::Float64Array,
 ) -> Option<u32> {
     use turnstile_core::behavior::{BehaviorInput, MouseSample};
     let mouse: Vec<MouseSample> = mouse
@@ -83,10 +85,16 @@ pub fn behavior_score(
             t_ms: c[2],
         })
         .collect();
+    let click_positions: Vec<(f64, f64)> = click_positions
+        .to_vec()
+        .chunks_exact(2)
+        .map(|c| (c[0], c[1]))
+        .collect();
     turnstile_core::behavior::score(&BehaviorInput {
         mouse,
         click_intervals_ms: click_intervals_ms.to_vec(),
         key_intervals_ms: key_intervals_ms.to_vec(),
+        click_positions,
     })
 }
 

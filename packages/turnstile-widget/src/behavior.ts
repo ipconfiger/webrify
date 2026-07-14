@@ -19,19 +19,25 @@ export interface BehaviorSnapshot {
   clickIntervals: Float64Array;
   /** Inter-key intervals, ms. */
   keyIntervals: Float64Array;
+  /** Click positions as flat `[x0,y0, x1,y1, …]` pairs. */
+  clickPositions: Float64Array;
 }
 
 export class BehaviorRecorder {
   private mouse: number[] = [];
   private clickIntervals: number[] = [];
   private keyIntervals: number[] = [];
+  private clickPositions: number[] = []; // flat [x, y] pairs
   private lastClickT: number | null = null;
   private lastKeyT: number | null = null;
   private detach: (() => void) | null = null;
 
   start(): void {
     const onMove = (e: MouseEvent) => this.pushMouse(e.clientX, e.clientY);
-    const onClick = () => this.pushInterval(this.clickIntervals, () => this.lastClickT, (t) => (this.lastClickT = t));
+    const onClick = (e: MouseEvent) => {
+      this.pushInterval(this.clickIntervals, () => this.lastClickT, (t) => (this.lastClickT = t));
+      this.clickPositions.push(e.clientX, e.clientY);
+    };
     const onKey = () => this.pushInterval(this.keyIntervals, () => this.lastKeyT, (t) => (this.lastKeyT = t));
     window.addEventListener("mousemove", onMove, { passive: true });
     window.addEventListener("click", onClick);
@@ -53,6 +59,7 @@ export class BehaviorRecorder {
       mouse: Float64Array.from(this.mouse),
       clickIntervals: Float64Array.from(this.clickIntervals),
       keyIntervals: Float64Array.from(this.keyIntervals),
+      clickPositions: Float64Array.from(this.clickPositions),
     };
   }
 

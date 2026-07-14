@@ -20,6 +20,16 @@ export interface TurnstileOptions {
   disableFingerprint?: boolean;
 }
 
+/** Generate a UUID v4 using `crypto.getRandomValues` — works in non-secure contexts
+ *  where `crypto.randomUUID()` is unavailable (plain HTTP on non-localhost). */
+function randomUUID(): string {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (crypto.getRandomValues(new Uint8Array(1))[0] % 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 type Status = "idle" | "fetching" | "solving" | "verifying" | "success" | "error";
 
 const LABELS: Record<Status, string> = {
@@ -37,6 +47,7 @@ const EMPTY_BEHAVIOR: BehaviorSnapshot = {
   mouse: new Float64Array(0),
   clickIntervals: new Float64Array(0),
   keyIntervals: new Float64Array(0),
+  clickPositions: new Float64Array(0),
 };
 
 export function TurnstileWidget({
@@ -119,11 +130,13 @@ export function TurnstileWidget({
           mouse: behavior.mouse,
           clickIntervals: behavior.clickIntervals,
           keyIntervals: behavior.keyIntervals,
+          clickPositions: behavior.clickPositions,
         },
         [
           behavior.mouse.buffer,
           behavior.clickIntervals.buffer,
           behavior.keyIntervals.buffer,
+          behavior.clickPositions.buffer,
         ],
       );
     });
@@ -160,7 +173,7 @@ export function TurnstileWidget({
           origin: challenge.origin,
           signature: challenge.signature,
           nonce,
-          idempotency_key: crypto.randomUUID(),
+          idempotency_key: randomUUID(),
           ...(fingerprint !== null ? { fingerprint } : {}),
           ...(behaviorScore !== null ? { behavior_score: behaviorScore } : {}),
         }),

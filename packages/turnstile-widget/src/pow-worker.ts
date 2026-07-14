@@ -15,6 +15,8 @@ interface SolveRequest {
   mouse: Float64Array;
   clickIntervals: Float64Array;
   keyIntervals: Float64Array;
+  /** Flat `[x0,y0, x1,y1, …]` click position pairs. */
+  clickPositions: Float64Array;
 }
 
 self.onmessage = async (e: MessageEvent<SolveRequest>) => {
@@ -27,16 +29,14 @@ self.onmessage = async (e: MessageEvent<SolveRequest>) => {
     mouse,
     clickIntervals,
     keyIntervals,
+    clickPositions,
   } = e.data;
   try {
     await init();
-    // Fingerprint: hash the signals and bind into the PoW seed (seed =
-    // challenge || fingerprint) so a solution can't be shared across clients.
-    // null when fingerprinting is disabled (GDPR PoW-only fallback).
     const fingerprint = fingerprintEnabled ? fingerprint_hash(signalsJson) : null;
     const nonce = solve_challenge(challenge, fingerprint, difficulty, maxnumber);
     // Behavior: human-likeness score (0-100) or null if too little signal.
-    const behaviorScore = behavior_score(mouse, clickIntervals, keyIntervals);
+    const behaviorScore = behavior_score(mouse, clickIntervals, keyIntervals, clickPositions);
     (self as unknown as Worker).postMessage({
       ok: true,
       nonce,

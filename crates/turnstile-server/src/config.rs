@@ -48,8 +48,11 @@ impl Config {
     }
 
     /// Whether `origin` (from a request `Origin` header) may use this service.
+    /// `"*"` in the allowlist means all origins are permitted.
     pub fn is_origin_allowed(&self, origin: &str) -> bool {
-        self.allowed_origins.iter().any(|o| o == origin)
+        self.allowed_origins
+            .iter()
+            .any(|o| o == "*" || o == origin)
     }
 }
 
@@ -163,7 +166,7 @@ pub enum ConfigError {
 }
 
 fn default_bind_addr() -> String {
-    "127.0.0.1:3000".into()
+    "0.0.0.0:3000".into()
 }
 fn default_redis_url() -> String {
     "redis://127.0.0.1:6379/0".into()
