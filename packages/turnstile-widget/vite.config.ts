@@ -30,6 +30,9 @@ export default defineConfig({
     // rerun-if-changed tracking handles re-embedding.
     emptyOutDir: false,
     target: "es2022",
+    rollupOptions: {
+      external: ["react", "react-dom", "react/jsx-runtime"],
+    },
   },
   worker: {
     plugins: () => [wasm()],
