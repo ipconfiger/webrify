@@ -18,6 +18,10 @@ export interface TurnstileOptions {
    * fingerprint-less verifications (PoW seed = challenge bytes only).
    */
   disableFingerprint?: boolean;
+  /** CSS class applied to the button element. */
+  className?: string;
+  /** Inline styles merged on top of defaults. User styles override defaults. */
+  style?: React.CSSProperties;
 }
 
 /** Generate a UUID v4 using `crypto.getRandomValues` — works in non-secure contexts
@@ -55,6 +59,8 @@ export function TurnstileWidget({
   onVerify,
   onError,
   disableFingerprint = false,
+  className,
+  style,
 }: TurnstileOptions) {
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState("");
@@ -193,6 +199,18 @@ export function TurnstileWidget({
     }
   }, [endpoint, onVerify, onError, disableFingerprint]);
 
+  const defaultStyle: React.CSSProperties = {
+    fontFamily: "system-ui, sans-serif",
+    fontSize: "14px",
+    padding: "8px 16px",
+    borderRadius: "6px",
+    border: "1px solid #ccc",
+    background: status === "success" ? "#e6f4ea" : "#fff",
+    color: status === "error" ? "#d93025" : "#1f1f1f",
+    cursor:
+      status === "idle" || status === "error" ? "pointer" : "default",
+  };
+
   return (
     <button
       type="button"
@@ -200,17 +218,8 @@ export function TurnstileWidget({
       disabled={BUSY.has(status) || status === "success"}
       aria-busy={BUSY.has(status)}
       aria-live="polite"
-      style={{
-        fontFamily: "system-ui, sans-serif",
-        fontSize: "14px",
-        padding: "8px 16px",
-        borderRadius: "6px",
-        border: "1px solid #ccc",
-        background: status === "success" ? "#e6f4ea" : "#fff",
-        color: status === "error" ? "#d93025" : "#1f1f1f",
-        cursor:
-          status === "idle" || status === "error" ? "pointer" : "default",
-      }}
+      className={className}
+      style={{ ...defaultStyle, ...style }}
     >
       {LABELS[status]}
       {status === "error" && errorMsg ? ` — ${errorMsg}` : null}
