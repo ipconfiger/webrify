@@ -1,13 +1,29 @@
 {
   "name": "@webrify/turnstile-widget",
   "version": "0.1.0",
-  "private": true,
+  "description": "Webrify Turnstile widget — browser-side CAPTCHA alternative with proof-of-work and behavior analysis",
+  "license": "MIT",
   "type": "module",
   "main": "dist/turnstile.js",
   "module": "dist/turnstile.js",
+  "files": [
+    "dist/turnstile.js",
+    "dist/assets/"
+  ],
   "scripts": {
     "build": "vite build",
     "dev": "vite"
+  },
+  "keywords": [
+    "captcha",
+    "turnstile",
+    "proof-of-work",
+    "webrify",
+    "anti-bot"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/webrify/webrify"
   },
   "dependencies": {
     "react": "^18.3.1",
