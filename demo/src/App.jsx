@@ -14,7 +14,7 @@ const hintStyle = { fontSize: 13, color: '#888', marginTop: 0, marginBottom: 12 
 /** 自定义 UI — 基于 useTurnstile hook，完全控制渲染 */
 function CustomCaptcha() {
   const { status, errorMessage, verify, reset } = useTurnstile({
-    endpoint: '',
+    endpoint: 'http://localhost:3000',
     onVerify: (token) => console.log('[Hook] token:', token),
     onError: (msg) => console.warn('[Hook] error:', msg),
     workerUrl: '/widget/assets/pow-worker-Bi7l--r_.js',
@@ -65,7 +65,7 @@ export default function App() {
   useEffect(() => {
     if (mountRef.current) {
       mount(mountRef.current, {
-        endpoint: '',
+        endpoint: 'http://localhost:3000',
         onVerify: (token) => console.log('[Mount] token:', token),
         workerUrl: '/widget/assets/pow-worker-Bi7l--r_.js',
       })
@@ -83,7 +83,7 @@ export default function App() {
         <h2 style={{ marginTop: 0 }}>1. Default Component</h2>
         <p style={hintStyle}>&lt;TurnstileWidget&gt; — drop-in with className/style props</p>
         <TurnstileWidget
-          endpoint=""
+          endpoint="http://localhost:3000"
           onVerify={(token) => console.log('[Component] token:', token)}
           style={{ fontSize: 15, padding: '10px 20px' }}
           workerUrl="/widget/assets/pow-worker-Bi7l--r_.js"
