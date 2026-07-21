@@ -18,6 +18,8 @@ export interface UseTurnstileOptions {
    * fingerprint-less verifications (PoW seed = challenge bytes only).
    */
   disableFingerprint?: boolean;
+  /** URL of the PoW worker script. Defaults to the bundled worker asset. */
+  workerUrl?: string;
 }
 
 export interface UseTurnstileReturn {
@@ -51,6 +53,7 @@ export function useTurnstile({
   onVerify,
   onError,
   disableFingerprint = false,
+  workerUrl,
 }: UseTurnstileOptions): UseTurnstileReturn {
   const [status, setStatus] = useState<Status>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -80,7 +83,9 @@ export function useTurnstile({
     behaviorScore: number | null;
   }> =>
     new Promise((resolve, reject) => {
-      const worker = new PowWorker();
+      const worker = workerUrl
+        ? new Worker(workerUrl, { type: "module" })
+        : new PowWorker();
       workerRef.current = worker;
       worker.onmessage = (e: MessageEvent) => {
         const data = e.data as {
@@ -187,7 +192,7 @@ export function useTurnstile({
       setStatus("error");
       onError?.(msg);
     }
-  }, [endpoint, onVerify, onError, disableFingerprint]);
+  }, [endpoint, onVerify, onError, disableFingerprint, workerUrl]);
 
   const reset = useCallback(() => {
     setStatus("idle");

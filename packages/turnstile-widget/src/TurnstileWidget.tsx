@@ -18,6 +18,8 @@ export interface TurnstileOptions {
   className?: string;
   /** Inline styles merged on top of defaults. User styles override defaults. */
   style?: React.CSSProperties;
+  /** URL of the PoW worker script. Defaults to the bundled worker asset. */
+  workerUrl?: string;
 }
 
 export type Status = "idle" | "fetching" | "solving" | "verifying" | "success" | "error";
@@ -40,12 +42,14 @@ export function TurnstileWidget({
   disableFingerprint = false,
   className,
   style,
+  workerUrl,
 }: TurnstileOptions) {
   const { status, errorMessage, verify } = useTurnstile({
     endpoint,
     onVerify,
     onError,
     disableFingerprint,
+    workerUrl,
   });
 
   const defaultStyle: React.CSSProperties = {

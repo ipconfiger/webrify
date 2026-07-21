@@ -17,6 +17,7 @@ function CustomCaptcha() {
     endpoint: '',
     onVerify: (token) => console.log('[Hook] token:', token),
     onError: (msg) => console.warn('[Hook] error:', msg),
+    workerUrl: '/widget/assets/pow-worker-Bi7l--r_.js',
   })
 
   const isDisabled = status !== 'idle' && status !== 'error'
@@ -66,6 +67,7 @@ export default function App() {
       mount(mountRef.current, {
         endpoint: '',
         onVerify: (token) => console.log('[Mount] token:', token),
+        workerUrl: '/widget/assets/pow-worker-Bi7l--r_.js',
       })
     }
   }, [])
@@ -84,6 +86,7 @@ export default function App() {
           endpoint=""
           onVerify={(token) => console.log('[Component] token:', token)}
           style={{ fontSize: 15, padding: '10px 20px' }}
+          workerUrl="/widget/assets/pow-worker-Bi7l--r_.js"
         />
       </section>
 
