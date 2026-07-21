@@ -3,8 +3,11 @@ import { createRoot } from "react-dom/client";
 import { TurnstileWidget } from "./TurnstileWidget";
 import type { TurnstileOptions } from "./TurnstileWidget";
 
-export { TurnstileWidget };
-export type { TurnstileOptions };
+export { TurnstileWidget, LABELS } from "./TurnstileWidget";
+export type { TurnstileOptions, Status } from "./TurnstileWidget";
+
+export { useTurnstile } from "./useTurnstile";
+export type { UseTurnstileOptions, UseTurnstileReturn } from "./useTurnstile";
 
 /**
  * Imperative mount for non-React host pages:
