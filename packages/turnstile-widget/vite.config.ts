@@ -46,7 +46,7 @@ export default defineConfig({
     emptyOutDir: false,
     target: "es2022",
     rollupOptions: {
-      external: ["react", "react-dom", "react/jsx-runtime"],
+      external: ["react", "react-dom", "react-dom/client", "react/jsx-runtime"],
     },
   },
   worker: {
