@@ -42,7 +42,16 @@ pub async fn create(
         Some(addr) => state.store.escalation_count(addr.ip()).await.unwrap_or(0),
         None => 0,
     };
-    let difficulty = pow::adjust_difficulty(cfg.difficulty, escalations);
+    // Auto-tune base difficulty from recent solve times. If the median solve
+    // time is under 100ms (too fast → likely bots/GPU), increase difficulty.
+    // If over 3s (too slow → frustrating users), decrease. Best-effort.
+    let median_ms = state.store.recent_solve_median().await.unwrap_or(None);
+    let tuned_base = match median_ms {
+        Some(t) if t < 100 => cfg.difficulty.saturating_add(1),
+        Some(t) if t > 3000 => cfg.difficulty.saturating_sub(1),
+        _ => cfg.difficulty,
+    };
+    let difficulty = pow::adjust_difficulty(tuned_base, escalations);
     state.metrics.inc_challenges_issued();
 
     let salt = hex::encode(rng::random_bytes(16).map_err(AppError::internal)?);
@@ -63,6 +72,7 @@ pub async fn create(
     let signature = hmac::sign(cfg.hmac_key.as_bytes(), &sig_str);
 
     Ok(Json(Challenge {
+        protocol_version: 1,
         algorithm: "SHA-256".to_string(),
         salt,
         challenge: challenge_hex,

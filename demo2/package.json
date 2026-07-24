@@ -1,0 +1,17 @@
+{
+  "name": "webrify-turnstile-demo2",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "webrify-turnstile": "0.2.3"
+  }
+}

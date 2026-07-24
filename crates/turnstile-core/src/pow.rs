@@ -74,6 +74,15 @@ pub fn solve(seed: &[u8], difficulty: u32) -> u64 {
     }
 }
 
+/// Like [`solve_bounded`], but searches `[start, end]` instead of `[0, max]`.
+/// Used by multi-threaded clients to split the search space across workers.
+pub fn solve_bounded_range(seed: &[u8], difficulty: u32, start: u64, end: u64) -> Option<u64> {
+    if difficulty == 0 {
+        return Some(0);
+    }
+    (start..=end).find(|&nonce| verify(seed, nonce, difficulty))
+}
+
 /// Like [`solve`], but gives up if no valid nonce is found within `[0, maxnumber]`.
 /// Returns `Some(nonce)` on success, `None` if the bounded search space is
 /// exhausted. Use this in constrained clients (e.g. the WASM widget) to respect

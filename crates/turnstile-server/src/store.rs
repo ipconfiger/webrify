@@ -88,6 +88,44 @@ impl ChallengeStore {
             Self::Cluster(c) => escalation_count_impl(&mut c.clone(), ip).await,
         }
     }
+
+    /// Record a successful solve time (milliseconds) for auto-tuning difficulty.
+    /// Best-effort — Redis failure returns `Err` but callers treat it as optional.
+    pub async fn record_solve_time(
+        &self,
+        solve_time_ms: u64,
+    ) -> Result<(), redis::RedisError> {
+        match self {
+            Self::Single(c) => record_solve_time_impl(&mut c.clone(), solve_time_ms).await,
+            Self::Cluster(c) => record_solve_time_impl(&mut c.clone(), solve_time_ms).await,
+        }
+    }
+
+    /// Median solve time from recent successful verifications (milliseconds).
+    /// Returns `None` if no data yet. Best-effort — callers fall back to a
+    /// sensible default on error.
+    pub async fn recent_solve_median(&self) -> Result<Option<u64>, redis::RedisError> {
+        match self {
+            Self::Single(c) => recent_solve_median_impl(&mut c.clone()).await,
+            Self::Cluster(c) => recent_solve_median_impl(&mut c.clone()).await,
+        }
+    }
+
+    /// Distributed rate-limit check via Redis `INCR` + `EXPIRE`. Returns `true`
+    /// if the request is within the limit, `false` if rate-limited. Fail-open:
+    /// Redis errors return `Ok(true)` — rate limiting is an enhancement, never
+    /// a security gate (the anti-replay `claim_spent` is already fail-closed).
+    pub async fn check_rate_limit(
+        &self,
+        ip: IpAddr,
+        max: u32,
+        window_secs: u64,
+    ) -> Result<bool, redis::RedisError> {
+        match self {
+            Self::Single(c) => check_rate_limit_impl(&mut c.clone(), ip, max, window_secs).await,
+            Self::Cluster(c) => check_rate_limit_impl(&mut c.clone(), ip, max, window_secs).await,
+        }
+    }
 }
 
 // Generic helpers over any `aio::ConnectionLike` (both ConnectionManager and the
@@ -144,6 +182,87 @@ fn spent_key(challenge_key: &str) -> String {
 
 fn escalation_key(ip: IpAddr) -> String {
     format!("webrify:escalation:{ip}")
+}
+
+async fn check_rate_limit_impl<C: redis::aio::ConnectionLike>(
+    conn: &mut C,
+    ip: IpAddr,
+    max: u32,
+    window_secs: u64,
+) -> Result<bool, redis::RedisError> {
+    let key = format!("webrify:rate:{ip}");
+    let count: u32 = redis::cmd("INCR").arg(&key).query_async(conn).await?;
+    if count == 1 {
+        let _: () = redis::cmd("EXPIRE")
+            .arg(&key)
+            .arg(window_secs)
+            .query_async(conn)
+            .await?;
+    }
+    Ok(count <= max)
+}
+
+/// Sorted set storing recent solve times for auto-tuning difficulty.
+fn solve_times_key() -> &'static str {
+    "webrify:solve_times"
+}
+
+/// Maximum number of recent solve times to retain in Redis.
+const MAX_SOLVE_TIMES: usize = 1000;
+
+async fn record_solve_time_impl<C: redis::aio::ConnectionLike>(
+    conn: &mut C,
+    solve_time_ms: u64,
+) -> Result<(), redis::RedisError> {
+    let key = solve_times_key();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // Score = timestamp, member = unique timestamp+value so duplicate values
+    // at the same second can coexist. Microsecond precision isn't needed here.
+    let member = format!("{now}:{solve_time_ms}");
+    redis::cmd("ZADD")
+        .arg(key)
+        .arg(now)
+        .arg(&member)
+        .query_async::<i64>(conn)
+        .await?;
+    // Trim to keep only the most recent entries.
+    let _: i64 = redis::cmd("ZREMRANGEBYRANK")
+        .arg(key)
+        .arg(0)
+        .arg(-((MAX_SOLVE_TIMES as isize) + 1))
+        .query_async(conn)
+        .await?;
+    Ok(())
+}
+
+async fn recent_solve_median_impl<C: redis::aio::ConnectionLike>(
+    conn: &mut C,
+) -> Result<Option<u64>, redis::RedisError> {
+    let key = solve_times_key();
+    let card: u64 = redis::cmd("ZCARD").arg(key).query_async(conn).await?;
+    if card == 0 {
+        return Ok(None);
+    }
+    // Get the median element. For even counts we take the lower-median index.
+    let mid = card.saturating_sub(1) / 2;
+    let members: Vec<String> = redis::cmd("ZRANGE")
+        .arg(key)
+        .arg(mid)
+        .arg(mid)
+        .query_async(conn)
+        .await?;
+    if members.is_empty() {
+        return Ok(None);
+    }
+    // Member format: "timestamp:ms_value"
+    let ms_str = members[0]
+        .split(':')
+        .nth(1)
+        .unwrap_or("1000");
+    Ok(Some(ms_str.parse().unwrap_or(1000)))
 }
 
 #[cfg(test)]

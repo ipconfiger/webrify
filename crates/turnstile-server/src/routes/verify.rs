@@ -76,12 +76,14 @@ async fn verify_inner(
 
     // 2. Origin allowlist.
     if !cfg.is_origin_allowed(&req.origin) {
+        state.metrics.inc_origin_rejected();
         return Err(AppError::OriginNotAllowed(req.origin.clone()));
     }
 
     // 3. Expiry.
     let now = now_secs();
     if req.expires_at <= now {
+        state.metrics.inc_challenge_expired();
         return Err(AppError::ChallengeInvalid);
     }
 
@@ -91,6 +93,7 @@ async fn verify_inner(
         .claim_spent(&req.challenge, Duration::from_secs(cfg.challenge_ttl_secs))
         .await?;
     if !claimed {
+        state.metrics.inc_replay_attempt();
         return Err(AppError::ChallengeAlreadyUsed);
     }
 
@@ -114,21 +117,22 @@ async fn verify_inner(
         return Err(AppError::VerifyFailed);
     }
 
-    // 7. Risk scoring (v1). Currently every signal is None/false at verify
-    // time (behavior arrives in Phase 3; server-side solve-timing + reputation
-    // in Phase 4), so this resolves to Allow(0). The hook + structured log are
-    // in place so filling the inputs later needs no call-site change.
+    // 7. Risk scoring. Signals from the client (solve_time_ms, behavior_score)
+    // feed into additive risk evaluation; missing signals (None) degrade gracefully.
     let risk = turnstile_core::risk::evaluate(&turnstile_core::risk::RiskInput {
         challenge_passed: true,
         fingerprint_blacklisted: false,
-        solve_time_ms: None,
+        solve_time_ms: req.solve_time_ms,
         behavior_score: req.behavior_score,
     });
     tracing::debug!(risk_score = risk.score, decision = ?risk.decision, "risk evaluated");
-    // Adaptive difficulty (Phase 3c): record an escalation for this peer so the
-    // next /challenge is harder. Best-effort — Redis-down doesn't fail the
-    // request (fail-open on tracking; verification is already fail-closed).
+    // Track risk decisions for observability.
     use turnstile_core::risk::Decision;
+    match risk.decision {
+        Decision::Allow => state.metrics.inc_risk_allow(),
+        Decision::Escalate => state.metrics.inc_risk_escalate(),
+        Decision::Deny => state.metrics.inc_risk_deny(),
+    }
     if matches!(risk.decision, Decision::Escalate | Decision::Deny) {
         if let Some(addr) = peer.0 {
             let _ = state
@@ -144,8 +148,15 @@ async fn verify_inner(
     // 8. Issue JWT (jti = fresh 128-bit random).
     let jti = hex::encode(rng::random_bytes(16).map_err(AppError::internal)?);
     let exp = now + cfg.jwt_ttl_secs as i64;
-    let claims = jwt::claims_for(&req.origin, &jti, exp);
+    let claims = jwt::claims_for(&req.origin, &jti, now, exp);
     let token = jwt::issue(cfg.jwt_key.as_bytes(), &claims).map_err(AppError::internal)?;
+
+    // Record solve time for auto-tuning difficulty. Best-effort — Redis blips
+    // don't fail the response (the user already successfully verified).
+    if let Some(t) = req.solve_time_ms {
+        state.metrics.record_solve_time(t);
+        let _ = state.store.record_solve_time(t).await;
+    }
 
     Ok(Json(VerifyResponse {
         success: true,

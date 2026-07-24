@@ -80,7 +80,7 @@ async fn solve_and_verify(
         origin: challenge.origin.clone(),
         signature: challenge.signature.clone(),
         nonce,
-        idempotency_key: format!("idem-{}", challenge.challenge),
+        solve_time_ms: None,
         fingerprint: None,
         behavior_score: None,
     };
@@ -237,7 +237,7 @@ async fn fingerprint_bound_flow_succeeds() {
         origin: challenge.origin.clone(),
         signature: challenge.signature.clone(),
         nonce,
-        idempotency_key: format!("idem-fp-{}", challenge.challenge),
+        solve_time_ms: None,
         fingerprint: Some(fp_hex),
         behavior_score: None,
     };

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BehaviorRecorder, type BehaviorSnapshot } from "./behavior";
 import { collectSignals } from "./fingerprint";
-import PowWorker from "./pow-worker?worker";
+import PowWorker from "./pow-worker?worker&inline";
 import type { Challenge, VerifyResponse } from "./types";
 
 export interface UseTurnstileOptions {
@@ -18,28 +18,20 @@ export interface UseTurnstileOptions {
    * fingerprint-less verifications (PoW seed = challenge bytes only).
    */
   disableFingerprint?: boolean;
-  /** URL of the PoW worker script. Defaults to the bundled worker asset. */
+  /** URL of the PoW worker script. Defaults to the bundled inline worker (self-contained). */
   workerUrl?: string;
 }
 
 export interface UseTurnstileReturn {
   status: "idle" | "fetching" | "solving" | "verifying" | "success" | "error";
   errorMessage: string | null;
+  /** PoW solve progress 0–100 (estimated, updated every 200ms). */
+  progress: number;
   verify: () => Promise<void>;
   reset: () => void;
 }
 
 type Status = UseTurnstileReturn["status"];
-
-/** Generate a UUID v4 using `crypto.getRandomValues` — works in non-secure contexts
- *  where `crypto.randomUUID()` is unavailable (plain HTTP on non-localhost). */
-function randomUUID(): string {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (crypto.getRandomValues(new Uint8Array(1))[0] % 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
 
 const EMPTY_BEHAVIOR: BehaviorSnapshot = {
   mouse: new Float64Array(0),
@@ -57,8 +49,8 @@ export function useTurnstile({
 }: UseTurnstileOptions): UseTurnstileReturn {
   const [status, setStatus] = useState<Status>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const workerRef = useRef<Worker | null>(null);
-  const behaviorRef = useRef<BehaviorRecorder | null>(null);
+    const [progress, setProgress] = useState<number>(0);
+    const behaviorRef = useRef<BehaviorRecorder | null>(null);
 
   // Record interaction telemetry from mount until unmount — the longer the user
   // is on the page before clicking, the richer the behavior signal.
@@ -81,70 +73,84 @@ export function useTurnstile({
     nonce: number;
     fingerprint: string | null;
     behaviorScore: number | null;
-  }> =>
-    new Promise((resolve, reject) => {
-      const worker = workerUrl
-        ? new Worker(workerUrl, { type: "module" })
-        : new PowWorker();
-      workerRef.current = worker;
-      worker.onmessage = (e: MessageEvent) => {
-        const data = e.data as {
-          ok: boolean;
-          nonce?: number;
-          fingerprint?: string | null;
-          behaviorScore?: number | null;
-          error?: string;
+  }> => {
+    // Determine worker count: min(hardwareConcurrency, 4), fallback to 2.
+    const numWorkers = Math.min(
+      navigator.hardwareConcurrency || 2,
+      4,
+    );
+    const chunkSize = Math.ceil(challenge.maxnumber / numWorkers);
+    const workers: Worker[] = [];
+
+    // Clone behavior data for each worker — ArrayBuffers are transferred
+    // (detached) so each worker needs its own copy.
+    const cloneFloat64 = (arr: Float64Array) => Float64Array.from(arr);
+    const spawnWorker = (start: number, end: number, isPrimary: boolean): Promise<{
+      nonce: number;
+      fingerprint: string | null;
+      behaviorScore: number | null;
+    }> =>
+      new Promise((resolveWorker, rejectWorker) => {
+        const w = workerUrl
+          ? new Worker(workerUrl, { type: "module" })
+          : new PowWorker();
+        workers.push(w);
+        w.onmessage = (e: MessageEvent) => {
+          const data = e.data as {
+            ok?: boolean; progress?: number; exhausted?: boolean;
+            nonce?: number; fingerprint?: string | null;
+            behaviorScore?: number | null; error?: string;
+          };
+          if (typeof data.progress === "number") {
+            setProgress((prev) => Math.max(prev, data.progress!));
+            return;
+          }
+          if (data.exhausted) { w.terminate(); rejectWorker(new Error("range exhausted")); return; }
+          if (data.ok && typeof data.nonce === "number") {
+            w.terminate();
+            resolveWorker({ nonce: data.nonce, fingerprint: data.fingerprint ?? null, behaviorScore: data.behaviorScore ?? null });
+          } else {
+            w.terminate();
+            rejectWorker(new Error(data.error ?? "solve failed"));
+          }
         };
-        worker.terminate();
-        workerRef.current = null;
-        if (
-          data.ok &&
-          typeof data.nonce === "number" &&
-          (data.fingerprint === null || typeof data.fingerprint === "string") &&
-          (data.behaviorScore === null ||
-            data.behaviorScore === undefined ||
-            typeof data.behaviorScore === "number")
-        ) {
-          resolve({
-            nonce: data.nonce,
-            fingerprint: data.fingerprint ?? null,
-            behaviorScore: data.behaviorScore ?? null,
-          });
-        } else {
-          reject(new Error(data.error ?? "solve failed"));
-        }
-      };
-      worker.onerror = (e: ErrorEvent) => {
-        worker.terminate();
-        workerRef.current = null;
-        reject(new Error(e.message || "worker error"));
-      };
-      // Transfer the underlying ArrayBuffers (zero-copy) — they're freshly
-      // snapshotted, so detaching on the main thread is fine.
-      worker.postMessage(
-        {
-          challenge: challenge.challenge,
-          difficulty: challenge.difficulty,
-          maxnumber: challenge.maxnumber,
-          signalsJson,
-          fingerprintEnabled,
-          mouse: behavior.mouse,
-          clickIntervals: behavior.clickIntervals,
-          keyIntervals: behavior.keyIntervals,
-          clickPositions: behavior.clickPositions,
-        },
-        [
-          behavior.mouse.buffer,
-          behavior.clickIntervals.buffer,
-          behavior.keyIntervals.buffer,
-          behavior.clickPositions.buffer,
-        ],
-      );
+        w.onerror = (e: ErrorEvent) => { w.terminate(); rejectWorker(new Error(e.message || "worker error")); };
+        // Only the primary worker computes fingerprint and behavior; others do PoW only.
+        const bm = isPrimary ? cloneFloat64(behavior.mouse) : new Float64Array(0);
+        const bci = isPrimary ? cloneFloat64(behavior.clickIntervals) : new Float64Array(0);
+        const bki = isPrimary ? cloneFloat64(behavior.keyIntervals) : new Float64Array(0);
+        const bcp = isPrimary ? cloneFloat64(behavior.clickPositions) : new Float64Array(0);
+        w.postMessage(
+          { challenge: challenge.challenge, difficulty: challenge.difficulty, maxnumber: challenge.maxnumber, nonceStart: start, nonceEnd: end, signalsJson, fingerprintEnabled: isPrimary && fingerprintEnabled, mouse: bm, clickIntervals: bci, keyIntervals: bki, clickPositions: bcp },
+          isPrimary ? [bm.buffer, bci.buffer, bki.buffer, bcp.buffer] : [],
+        );
+      });
+
+    // Spawn workers, each searching a non-overlapping range.
+    const promises: Promise<{
+      nonce: number;
+      fingerprint: string | null;
+      behaviorScore: number | null;
+    }>[] = [];
+    for (let i = 0; i < numWorkers; i++) {
+      const start = i * chunkSize;
+      const end = Math.min(start + chunkSize - 1, challenge.maxnumber);
+      promises.push(spawnWorker(start, end, i === 0));
+    }
+
+    // First worker to find a valid nonce wins.
+    return Promise.any(promises).finally(() => {
+      // Clean up any remaining workers.
+      for (const w of workers) {
+        try { w.terminate(); } catch { /* already terminated */ }
+      }
     });
+  };
 
   const verify = useCallback(async () => {
     try {
       setStatus("fetching");
+      const t0 = performance.now();
       const chalRes = await fetch(`${endpoint}/challenge`, { method: "POST" });
       if (!chalRes.ok) throw new Error(`challenge failed (${chalRes.status})`);
       const challenge = (await chalRes.json()) as Challenge;
@@ -159,12 +165,14 @@ export function useTurnstile({
         fingerprintEnabled,
         behavior,
       );
+      const solveTimeMs = Math.round(performance.now() - t0);
 
       setStatus("verifying");
       const verifyRes = await fetch(`${endpoint}/verify`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          protocol_version: challenge.protocol_version,
           algorithm: challenge.algorithm,
           challenge: challenge.challenge,
           salt: challenge.salt,
@@ -174,7 +182,7 @@ export function useTurnstile({
           origin: challenge.origin,
           signature: challenge.signature,
           nonce,
-          idempotency_key: randomUUID(),
+          solve_time_ms: solveTimeMs,
           ...(fingerprint !== null ? { fingerprint } : {}),
           ...(behaviorScore !== null ? { behavior_score: behaviorScore } : {}),
         }),
@@ -197,7 +205,8 @@ export function useTurnstile({
   const reset = useCallback(() => {
     setStatus("idle");
     setErrorMessage(null);
+    setProgress(0);
   }, []);
 
-  return { status, errorMessage, verify, reset };
+  return { status, errorMessage, progress, verify, reset };
 }

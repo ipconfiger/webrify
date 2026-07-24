@@ -3,6 +3,7 @@
 // range; see the Rust crate's `#[ts(type = "number")]` annotations).
 
 export interface Challenge {
+  protocol_version: number;
   algorithm: string;
   salt: string;
   challenge: string;

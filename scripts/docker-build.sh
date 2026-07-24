@@ -2,17 +2,19 @@
 # Webrify Turnstile — Docker image build script.
 #
 # Builds the self-contained image (Rust server + embedded Redis).
-# The full pipeline (wasm → widget → server → runtime) runs inside Docker.
+# Requires `bin/webrify` to exist (run `./scripts/build-release.sh` first).
 #
 # Usage:
 #   ./scripts/docker-build.sh              # build as webrify:latest
 #   ./scripts/docker-build.sh -t mytag      # custom tag
 #   ./scripts/docker-build.sh --no-cache    # force full rebuild
+#   ./scripts/docker-build.sh --release     # run build-release.sh first
 
 set -euo pipefail
 
 TAG="webrify:latest"
 CACHE_ARG=""
+RELEASE=false
 CONTEXT="$(cd "$(dirname "$0")/.." && pwd)"
 
 while [[ $# -gt 0 ]]; do
@@ -25,9 +27,15 @@ while [[ $# -gt 0 ]]; do
             CACHE_ARG="--no-cache"
             shift
             ;;
+        --release)
+            RELEASE=true
+            shift
+            ;;
         -h|--help)
-            echo "Usage: $0 [-t TAG] [--no-cache]"
+            echo "Usage: $0 [-t TAG] [--no-cache] [--release]"
             echo "Build the webrify Docker image (server + embedded Redis)."
+            echo ""
+            echo "  --release    Run scripts/build-release.sh first to build bin/webrify"
             exit 0
             ;;
         *)
@@ -37,7 +45,19 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo "=== Building $TAG ==="
+if [ "$RELEASE" = true ]; then
+    echo "=== Building release binary ==="
+    "$CONTEXT/scripts/build-release.sh"
+    echo ""
+fi
+
+if [ ! -f "$CONTEXT/bin/webrify" ]; then
+    echo "ERROR: bin/webrify not found."
+    echo "Run './scripts/build-release.sh' first, or use '--release' flag."
+    exit 1
+fi
+
+echo "=== Building Docker image: $TAG ==="
 echo "Context: $CONTEXT"
 echo ""
 

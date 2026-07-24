@@ -20,6 +20,8 @@ use ts_rs::TS;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Challenge {
+    /// Protocol version for forward-compatibility. Currently `1`.
+    pub protocol_version: u32,
     /// Hash algorithm, e.g. `"SHA-256"`. Covered by `signature`.
     pub algorithm: String,
     /// Per-challenge random salt (hex). Covered by `signature`. NOT part of the PoW seed.
@@ -50,6 +52,8 @@ pub struct Challenge {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct VerifyRequest {
+    /// Protocol version (echoed from challenge). Currently `1`.
+    pub protocol_version: u32,
     /// Hash algorithm (echoed from the challenge; needed to recompute HMAC).
     pub algorithm: String,
     /// The PoW seed (hex; hex-decode identically to the client).
@@ -71,8 +75,10 @@ pub struct VerifyRequest {
     /// The nonce the client found.
     #[ts(type = "number")]
     pub nonce: u64,
-    /// Client-generated key making repeated submits idempotent.
-    pub idempotency_key: String,
+    /// Wall-clock milliseconds from challenge fetch to solve completion.
+    /// `None` for older clients that don't send it.
+    #[ts(type = "number")]
+    pub solve_time_ms: Option<u64>,
     /// Optional client-computed fingerprint hash (default TS mapping: `string | null`).
     pub fingerprint: Option<String>,
     /// Optional client-computed behavior score in `[0, 100]` (higher = more
@@ -92,6 +98,9 @@ pub struct JwtClaims {
     pub aud: String,
     /// Unique token id (random, for revocation/audit).
     pub jti: String,
+    /// Not before, unix epoch seconds.
+    #[ts(type = "number")]
+    pub nbf: i64,
     /// Expiry, unix epoch seconds.
     #[ts(type = "number")]
     pub exp: i64,
@@ -105,6 +114,7 @@ mod tests {
 
     fn sample_challenge() -> Challenge {
         Challenge {
+            protocol_version: 1,
             algorithm: "SHA-256".into(),
             salt: "deadbeef".into(),
             challenge: "cafebabe1234".into(),
@@ -126,6 +136,7 @@ mod tests {
 
     fn sample_verify_request() -> VerifyRequest {
         VerifyRequest {
+            protocol_version: 1,
             algorithm: "SHA-256".into(),
             challenge: "cafebabe1234".into(),
             salt: "deadbeef".into(),
@@ -135,7 +146,7 @@ mod tests {
             origin: "https://example.com".into(),
             signature: "aabbccdd".into(),
             nonce: 4721,
-            idempotency_key: "550e8400-e29b-41d4-a716-446655440000".into(),
+            solve_time_ms: Some(1200),
             fingerprint: Some("fp-hash".into()),
             behavior_score: Some(82),
         }
@@ -154,6 +165,7 @@ mod tests {
         let req = VerifyRequest {
             fingerprint: None,
             behavior_score: None,
+            solve_time_ms: None,
             ..sample_verify_request()
         };
         let json = serde_json::to_string(&req).unwrap();
@@ -167,6 +179,7 @@ mod tests {
             iss: "webrify".into(),
             aud: "https://example.com".into(),
             jti: "token-id".into(),
+            nbf: 1_758_000_000,
             exp: 1_758_000_900,
             origin: "https://example.com".into(),
         };

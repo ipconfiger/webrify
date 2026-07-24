@@ -47,9 +47,24 @@ impl RateLimiter {
     /// `false` if the peer is rate-limited. Recovers from a poisoned lock
     /// (a panic elsewhere) rather than propagating — rate limiting must never
     /// take the server down.
+    ///
+    /// Periodically evicts expired entries to prevent unbounded memory growth
+    /// under sustained abuse from rotating IPs.
     pub fn check(&self, ip: IpAddr) -> bool {
         let mut windows = self.windows.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
+
+        // Evict expired entries when the map grows large (DoS protection).
+        const MAX_ENTRIES: usize = 100_000;
+        if windows.len() > MAX_ENTRIES {
+            windows.retain(|_, w| now.duration_since(w.start) < self.window);
+            // If still too many after eviction, clear entirely — memory safety
+            // trumps rate-limit accuracy.
+            if windows.len() > MAX_ENTRIES {
+                windows.clear();
+            }
+        }
+
         let entry = windows.entry(ip).or_insert(Window {
             start: now,
             count: 0,
@@ -63,20 +78,32 @@ impl RateLimiter {
     }
 }
 
-/// axum middleware: enforce [`RateLimiter`] per peer IP.
+/// axum middleware: enforce per-route rate limits by request path.
+///
+/// State is a tuple of `(challenge_limiter, default_limiter)`. The middleware
+/// selects the limiter based on the request path so `/challenge` gets a stricter
+/// limit than `/verify` and other routes.
 ///
 /// Wire in `main()`:
 /// ```ignore
-/// let limiter = Arc::new(RateLimiter::new(Duration::from_secs(1), 10));
-/// let app = app(state).layer(from_fn_with_state(limiter, rate_limit_middleware));
-/// axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>());
+/// let challenge = Arc::new(RateLimiter::new(Duration::from_secs(1), 3));
+/// let default  = Arc::new(RateLimiter::new(Duration::from_secs(1), 10));
+/// let app = app(state).layer(from_fn_with_state(
+///     (challenge, default),
+///     rate_limit_middleware,
+/// ));
 /// ```
 pub async fn rate_limit_middleware(
-    State(limiter): State<Arc<RateLimiter>>,
+    State((challenge_limiter, default_limiter)): State<(Arc<RateLimiter>, Arc<RateLimiter>)>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     req: Request,
     next: Next,
 ) -> Response {
+    let limiter = if req.uri().path() == "/challenge" {
+        &challenge_limiter
+    } else {
+        &default_limiter
+    };
     if !limiter.check(addr.ip()) {
         return (
             StatusCode::TOO_MANY_REQUESTS,

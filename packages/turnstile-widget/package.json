@@ -1,6 +1,6 @@
 {
-  "name": "@webrify/turnstile-widget",
-  "version": "0.2.2",
+  "name": "webrify-turnstile",
+  "version": "0.3.4",
   "description": "Webrify Turnstile widget — browser-side CAPTCHA alternative with proof-of-work and behavior analysis",
   "license": "MIT",
   "type": "module",
@@ -9,9 +9,7 @@
   "types": "dist/index.d.ts",
   "files": [
     "dist/turnstile.js",
-    "dist/assets/",
-    "dist/index.d.ts",
-    "dist/TurnstileWidget.d.ts"
+    "dist/index.d.ts"
   ],
   "scripts": {
     "build": "vite build",

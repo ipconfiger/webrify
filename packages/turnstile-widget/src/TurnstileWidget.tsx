@@ -18,7 +18,7 @@ export interface TurnstileOptions {
   className?: string;
   /** Inline styles merged on top of defaults. User styles override defaults. */
   style?: React.CSSProperties;
-  /** URL of the PoW worker script. Defaults to the bundled worker asset. */
+  /** URL of the PoW worker script. Defaults to the bundled inline worker (self-contained). */
   workerUrl?: string;
 }
 

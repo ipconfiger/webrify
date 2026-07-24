@@ -18,6 +18,30 @@ pub fn init() {
     console_error_panic_hook::set_once();
 }
 
+/// Solve the PoW within `[start, end]` instead of `[0, max]`.
+///
+/// Used by multi-worker clients that split the nonce search space across
+/// several Web Workers. Returns `null` (JS `undefined`) if no solution exists
+/// within this range instead of throwing — the caller checks all workers
+/// and only reports failure if every worker exhausted its range.
+#[wasm_bindgen]
+pub fn solve_challenge_range(
+    challenge_hex: &str,
+    fingerprint_hex: Option<String>,
+    difficulty: u32,
+    start: f64,
+    end: f64,
+) -> Option<f64> {
+    let mut seed = hex::decode(challenge_hex).ok()?;
+    if let Some(fp_hex) = fingerprint_hex {
+        if let Ok(fp) = hex::decode(&fp_hex) {
+            seed.extend_from_slice(&fp);
+        }
+    }
+    turnstile_core::pow::solve_bounded_range(&seed, difficulty, start as u64, end as u64)
+        .map(|n| n as f64)
+}
+
 /// Solve the PoW.
 ///
 /// Builds the canonical seed as `hex_decode(challenge_hex) || hex_decode(fingerprint_hex)`

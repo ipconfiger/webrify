@@ -35,12 +35,16 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     };
     let state = AppState::new(config, store);
 
-    // Per-IP rate limit, applied in production only — the test-facing `app()`
-    // builder stays unthrottled (its oneshot requests carry no peer addr).
-    // 10 req/s/IP, 1s fixed window — generous for a real user, painful for a
-    // script. TODO: make env-configurable.
-    let limiter = Arc::new(RateLimiter::new(Duration::from_secs(1), 10));
-    let app = app(state).layer(from_fn_with_state(limiter, rate_limit_middleware));
+    // Per-IP rate limits, per-route:
+    //   - /challenge: 3 req/s/IP (cheap, but prevents offline GPU farming)
+    //   - all others: 10 req/s/IP (needs headroom for verify retries)
+    let challenge_limiter = Arc::new(RateLimiter::new(Duration::from_secs(1), 3));
+    let default_limiter = Arc::new(RateLimiter::new(Duration::from_secs(1), 10));
+    let app = app(state)
+        .layer(from_fn_with_state(
+            (challenge_limiter, default_limiter),
+            rate_limit_middleware,
+        ));
 
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
     tracing::info!(%bind_addr, "webrify turnstile server listening");
